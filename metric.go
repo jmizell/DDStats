@@ -10,12 +10,12 @@ const (
 )
 
 type DDMetric struct {
-	Host     string       `json:"host"`
-	Interval int64        `json:"interval"`
-	Metric   string       `json:"metric"`
+	Host     string           `json:"host"`
+	Interval int64            `json:"interval"`
+	Metric   string           `json:"metric"`
 	Points   [][2]interface{} `json:"points"`
-	Tags     []string     `json:"tags"`
-	Type     string       `json:"type"`
+	Tags     []string         `json:"tags"`
+	Type     string           `json:"type"`
 }
 
 type DDMetricSeries struct {
@@ -50,7 +50,7 @@ func (m *metric) getMetric(namespace, host string, tags []string, interval time.
 		metric.Points = [][2]interface{}{{time.Now().Unix(), m.value}}
 	case metricCount:
 		metric.Interval = int64(interval.Seconds())
-		metric.Points = [][2]interface{}{{time.Now().Unix(), m.value/interval.Seconds()}}
+		metric.Points = [][2]interface{}{{time.Now().Unix(), m.value / interval.Seconds()}}
 	}
 	return metric
 }
