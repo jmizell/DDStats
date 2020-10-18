@@ -1,5 +1,9 @@
 package DDStats
 
+import (
+	"time"
+)
+
 const (
 	metricCount = "count"
 	metricGauge = "gauge"
@@ -9,31 +13,44 @@ type DDMetric struct {
 	Host     string       `json:"host"`
 	Interval int64        `json:"interval"`
 	Metric   string       `json:"metric"`
-	Points   [][2]float64 `json:"points"`
+	Points   [][2]interface{} `json:"points"`
 	Tags     []string     `json:"tags"`
 	Type     string       `json:"type"`
 }
 
-type DDMetricSeries []*DDMetric
+type DDMetricSeries struct {
+	Series []*DDMetric `json:"series"`
+}
 
 type metric struct {
 	name  string
 	class string
-	value interface{}
+	value float64
 	tags  []string
 }
 
-func (m *metric) update(v interface{}) {
+func (m *metric) update(v float64) {
 	switch m.class {
-	case metricCount:
-		x := m.value.(int64)
-		x += v.(int64)
-		m.value = x
 	case metricGauge:
 		m.value = v
+	case metricCount:
+		m.value += v
 	}
 }
 
-func (m *metric) getMetric(namespace string, tags []string) *DDMetric {
-	panic("implement me")
+func (m *metric) getMetric(namespace, host string, tags []string, interval time.Duration) *DDMetric {
+	metric := &DDMetric{
+		Host:   host,
+		Metric: prependNamespace(namespace, m.name),
+		Tags:   combineTags(m.tags, tags),
+		Type:   m.class,
+	}
+	switch m.class {
+	case metricGauge:
+		metric.Points = [][2]interface{}{{time.Now().Unix(), m.value}}
+	case metricCount:
+		metric.Interval = int64(interval.Seconds())
+		metric.Points = [][2]interface{}{{time.Now().Unix(), m.value/interval.Seconds()}}
+	}
+	return metric
 }

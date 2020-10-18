@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	DefaultWorkerCount  = 10
-	DefaultWorkerBuffer = 100
+	DefaultWorkerCount   = 10
+	DefaultWorkerBuffer  = 100
+	DefaultFlushInterval = time.Second * 60
 )
 
 type job struct {
@@ -21,11 +22,13 @@ type job struct {
 
 type Stats struct {
 	namespace     string
+	host          string
 	tags          []string
+	flushInterval time.Duration
 	workerCount   int
 	workerBuffer  int
 	metricBuffer  int
-	client        *Client
+	client        APIClient
 	metrics       []map[string]*metric
 	metricUpdates chan *metric
 	workers       []chan *job
@@ -38,14 +41,16 @@ type Stats struct {
 	errorLock     *sync.RWMutex
 }
 
-func NewStats(namespace string, tags []string) *Stats {
+func NewStats(namespace, host, apiKey string, tags []string) *Stats {
 	s := &Stats{
-		namespace:    namespace,
-		tags:         tags,
-		workerCount:  DefaultWorkerCount,
-		workerBuffer: DefaultWorkerBuffer,
-		metricBuffer: DefaultWorkerBuffer * DefaultWorkerCount,
-		client:       NewClient(),
+		namespace:     namespace,
+		host:          host,
+		tags:          tags,
+		flushInterval: DefaultFlushInterval,
+		workerCount:   DefaultWorkerCount,
+		workerBuffer:  DefaultWorkerBuffer,
+		metricBuffer:  DefaultWorkerBuffer * DefaultWorkerCount,
+		client:        NewDDClient(apiKey),
 	}
 	s.start()
 	return s
@@ -71,7 +76,7 @@ func (c *Stats) start() {
 
 	cancelFlush := make(chan bool)
 	go func() {
-		flush := time.NewTicker(time.Minute * 1)
+		flush := time.NewTicker(c.flushInterval)
 		for {
 			select {
 			case <-flush.C:
@@ -92,7 +97,6 @@ func (c *Stats) start() {
 		case <-c.flush:
 			c.wg.Wait()
 			metrics := c.metrics
-			c.metrics = make([]map[string]*metric, c.workerCount)
 			for i := range c.metrics {
 				c.metrics[i] = map[string]*metric{}
 			}
@@ -141,9 +145,9 @@ func (c *Stats) send(metrics []map[string]*metric) {
 		return
 	}
 
-	metricsSeries := make(DDMetricSeries, 0, len(flattenedMetrics))
+	metricsSeries := make([]*DDMetric, 0, len(flattenedMetrics))
 	for _, m := range flattenedMetrics {
-		metricsSeries = append(metricsSeries, m.getMetric(c.namespace, c.tags))
+		metricsSeries = append(metricsSeries, m.getMetric(c.namespace, c.host, c.tags, c.flushInterval))
 	}
 	if err := c.SendSeries(metricsSeries); err != nil {
 		c.errorLock.Lock()
@@ -159,22 +163,27 @@ func (c *Stats) send(metrics []map[string]*metric) {
 	}
 }
 
-func (c *Stats) SendSeries(series DDMetricSeries) error {
-	return c.client.SendSeries(series)
+func (c *Stats) SendSeries(series []*DDMetric) error {
+	return c.client.SendSeries(&DDMetricSeries{Series: series})
 }
 
-func (c *Stats) ServiceCheck(check, host, message string, status Status, tags []string) error {
+func (c *Stats) ServiceCheck(check, message string, status Status, tags []string) error {
 	return c.client.SendServiceCheck(&DDServiceCheck{
-		Check:     check,
-		Hostname:  host,
+		Check:     prependNamespace(c.namespace, check),
+		Hostname:  c.host,
 		Message:   message,
 		Status:    status,
-		Tags:      tags,
+		Tags:      combineTags(c.tags, tags),
 		Timestamp: time.Now().Unix(),
 	})
 }
 
 func (c *Stats) Event(event *DDEvent) error {
+	if event.Host == "" {
+		event.Host = c.host
+	}
+	event.AggregationKey = prependNamespace(c.namespace, event.AggregationKey)
+	event.Tags = combineTags(c.tags, event.Tags)
 	return c.client.SendEvent(event)
 }
 
@@ -186,13 +195,28 @@ func (c *Stats) Decrement(name string, tags []string) {
 	c.Count(name, -1, tags)
 }
 
-func (c *Stats) Count(name string, value int64, tags []string) {
-
-	c.metricUpdates <- &metric{name: name, class: metricCount, value: value, tags: tags}
+func (c *Stats) Count(name string, value float64, tags []string) {
+	select {
+	case c.metricUpdates <- &metric{
+		name:  name,
+		class: metricCount,
+		value: value,
+		tags:  tags,
+	}:
+	default:
+	}
 }
 
 func (c *Stats) Gauge(name string, value float64, tags []string) {
-	c.metricUpdates <- &metric{name: name, class: metricGauge, value: value, tags: tags}
+	select {
+	case c.metricUpdates <- &metric{
+		name:  name,
+		class: metricGauge,
+		value: value,
+		tags:  tags,
+	}:
+	default:
+	}
 }
 
 func (c *Stats) Flush() {
@@ -219,6 +243,43 @@ func (c *Stats) Close() {
 	c.shutdown <- true
 	c.wg.Wait()
 }
+
+func prependNamespace(namespace, name string) string {
+
+	if namespace == "" {
+		return namespace
+	}
+
+	if strings.HasPrefix(name, namespace) {
+		return name
+	}
+
+	return fmt.Sprintf("%s.%s", namespace, name)
+}
+
+func combineTags(tags1, tags2 []string) []string {
+
+	if tags1 == nil && tags2 == nil {
+		return []string{}
+	} else if tags1 == nil {
+		return tags2
+	} else if tags2 == nil {
+		return tags1
+	}
+
+	uniqueTags := make(map[string]bool)
+	for _, tag := range append(tags1, tags2...) {
+		uniqueTags[tag] = true
+	}
+
+	newTags := make([]string, 0, len(uniqueTags))
+	for tag := range uniqueTags {
+		newTags = append(newTags, tag)
+	}
+
+	return newTags
+}
+
 
 func metricKey(name string, tags []string) string {
 	sort.Strings(tags)
