@@ -60,6 +60,8 @@ func (c *DDClient) SendEvent(event *DDEvent) error {
 
 func (c *DDClient) post(payload interface{}, encoding, url string) error {
 
+	url = fmt.Sprintf("%s?api_key=%s", url, c.apiKey)
+
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("could not marshal data to json, %s", err.Error())
