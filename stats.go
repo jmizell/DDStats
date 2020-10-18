@@ -280,7 +280,6 @@ func combineTags(tags1, tags2 []string) []string {
 	return newTags
 }
 
-
 func metricKey(name string, tags []string) string {
 	sort.Strings(tags)
 	return fmt.Sprintf("%s%s", name, strings.Join(tags, ""))
