@@ -50,7 +50,10 @@ func (m *metric) getMetric(namespace, host string, tags []string, interval time.
 		metric.Points = [][2]interface{}{{time.Now().Unix(), m.value}}
 	case metricCount:
 		metric.Interval = int64(interval.Seconds())
-		metric.Points = [][2]interface{}{{time.Now().Unix(), m.value / interval.Seconds()}}
+		if metric.Interval == 0 {
+			metric.Interval = 1
+		}
+		metric.Points = [][2]interface{}{{time.Now().Unix(), m.value / float64(metric.Interval)}}
 	}
 	return metric
 }

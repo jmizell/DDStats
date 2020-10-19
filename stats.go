@@ -35,6 +35,8 @@ type Stats struct {
 	shutdown      chan bool
 	flush         chan bool
 	wg            *sync.WaitGroup
+	flushWG       *sync.WaitGroup
+	ready         chan bool
 	flushCallback func(metrics map[string]*metric)
 	errorCallback func(err error)
 	errors        []error
@@ -50,6 +52,7 @@ func NewStats(namespace, host, apiKey string, tags []string) *Stats {
 		workerCount:   DefaultWorkerCount,
 		workerBuffer:  DefaultWorkerBuffer,
 		metricBuffer:  DefaultWorkerBuffer * DefaultWorkerCount,
+		ready:         make(chan bool, 1),
 		client:        NewDDClient(apiKey),
 	}
 	s.start()
@@ -73,6 +76,7 @@ func (c *Stats) start() {
 	c.shutdown = make(chan bool)
 	c.flush = make(chan bool)
 	c.wg = &sync.WaitGroup{}
+	c.flushWG = &sync.WaitGroup{}
 
 	cancelFlush := make(chan bool)
 	go func() {
@@ -88,19 +92,30 @@ func (c *Stats) start() {
 			}
 		}
 	}()
+	c.ready <- true
 
+	lastFlush := time.Now()
 	for {
 		select {
 		case metric := <-c.metricUpdates:
 			c.wg.Add(1)
 			c.workers[fnv1a(metric.name)%uint32(len(c.workers))] <- &job{metric: metric}
 		case <-c.flush:
+			// TODO make non-blocking
 			c.wg.Wait()
-			metrics := c.metrics
+			flattenedMetrics := make(map[string]*metric)
+			for _, m := range c.metrics {
+				for k, v := range m {
+					flattenedMetrics[k] = v
+				}
+			}
 			for i := range c.metrics {
 				c.metrics[i] = map[string]*metric{}
 			}
-			go c.send(metrics)
+			interval := time.Since(lastFlush)
+			c.flushWG.Add(1)
+			go c.send(flattenedMetrics, interval)
+			lastFlush = time.Now()
 		case <-c.shutdown:
 			for i := range c.workers {
 				c.wg.Add(1)
@@ -112,6 +127,10 @@ func (c *Stats) start() {
 			return
 		}
 	}
+}
+
+func (c *Stats) Ready() {
+	<-c.ready
 }
 
 func (c *Stats) worker(jobs chan *job, id int) {
@@ -132,22 +151,17 @@ func (c *Stats) worker(jobs chan *job, id int) {
 	}
 }
 
-func (c *Stats) send(metrics []map[string]*metric) {
+func (c *Stats) send(metrics map[string]*metric, flushTime time.Duration) {
 
-	flattenedMetrics := make(map[string]*metric)
-	for _, m := range metrics {
-		for k, v := range m {
-			flattenedMetrics[k] = v
-		}
-	}
+	defer c.flushWG.Done()
 
-	if len(flattenedMetrics) == 0 {
+	if len(metrics) == 0 {
 		return
 	}
 
-	metricsSeries := make([]*DDMetric, 0, len(flattenedMetrics))
-	for _, m := range flattenedMetrics {
-		metricsSeries = append(metricsSeries, m.getMetric(c.namespace, c.host, c.tags, c.flushInterval))
+	metricsSeries := make([]*DDMetric, 0, len(metrics))
+	for _, m := range metrics {
+		metricsSeries = append(metricsSeries, m.getMetric(c.namespace, c.host, c.tags, flushTime))
 	}
 	if err := c.SendSeries(metricsSeries); err != nil {
 		c.errorLock.Lock()
@@ -159,11 +173,18 @@ func (c *Stats) send(metrics []map[string]*metric) {
 	}
 
 	if c.flushCallback != nil {
-		c.flushCallback(flattenedMetrics)
+		c.flushCallback(metrics)
 	}
 }
 
 func (c *Stats) SendSeries(series []*DDMetric) error {
+	for _, m := range series {
+		if m.Host == "" {
+			m.Host = c.host
+		}
+		m.Metric = prependNamespace(c.namespace, m.Metric)
+		m.Tags = combineTags(c.tags, m.Tags)
+	}
 	return c.client.SendSeries(&DDMetricSeries{Series: series})
 }
 
@@ -242,6 +263,7 @@ func (c *Stats) Close() {
 	c.Flush()
 	c.shutdown <- true
 	c.wg.Wait()
+	c.flushWG.Wait()
 }
 
 func prependNamespace(namespace, name string) string {
