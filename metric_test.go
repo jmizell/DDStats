@@ -62,7 +62,7 @@ func TestMetricGetMetric(t *testing.T) {
 
 	t.Run("count 1 sec interval", func(tt *testing.T) {
 		m := &metric{class: metricCount, value: 10}
-		ddm := m.getMetric("", "", nil, time.Second * 1)
+		ddm := m.getMetric("", "", nil, time.Second*1)
 		if len(ddm.Points) != 1 {
 			tt.Fatalf("expected to have %d points, have %d", 1, len(ddm.Points))
 		}
@@ -76,7 +76,7 @@ func TestMetricGetMetric(t *testing.T) {
 
 	t.Run("count 5 sec interval", func(tt *testing.T) {
 		m := &metric{class: metricCount, value: 10}
-		ddm := m.getMetric("", "", nil, time.Second * 5)
+		ddm := m.getMetric("", "", nil, time.Second*5)
 		if len(ddm.Points) != 1 {
 			tt.Fatalf("expected to have %d points, have %d", 1, len(ddm.Points))
 		}
@@ -90,7 +90,7 @@ func TestMetricGetMetric(t *testing.T) {
 
 	t.Run("gauge 1 sec interval", func(tt *testing.T) {
 		m := &metric{class: metricGauge, value: 10}
-		ddm := m.getMetric("", "", nil, time.Second * 1)
+		ddm := m.getMetric("", "", nil, time.Second*1)
 		if len(ddm.Points) != 1 {
 			tt.Fatalf("expected to have %d points, have %d", 1, len(ddm.Points))
 		}
@@ -101,10 +101,10 @@ func TestMetricGetMetric(t *testing.T) {
 			tt.Fatalf("expected interval to be %d, have %d", 0, ddm.Interval)
 		}
 	})
-	
+
 	t.Run("gauge 5 sec interval", func(tt *testing.T) {
 		m := &metric{class: metricGauge, value: 10}
-		ddm := m.getMetric("", "", nil, time.Second * 5)
+		ddm := m.getMetric("", "", nil, time.Second*5)
 		if len(ddm.Points) != 1 {
 			tt.Fatalf("expected to have %d points, have %d", 1, len(ddm.Points))
 		}
