@@ -44,6 +44,7 @@ type Stats struct {
 }
 
 func NewStats(namespace, host, apiKey string, tags []string) *Stats {
+	// TODO implement config options
 	s := &Stats{
 		namespace:     namespace,
 		host:          host,
@@ -166,6 +167,7 @@ func (c *Stats) send(metrics map[string]*metric, flushTime time.Duration) {
 	}
 	if err := c.SendSeries(metricsSeries); err != nil {
 		c.errorLock.Lock()
+		// TODO keep this list from growing large, cap size
 		c.errors = append(c.errors, err)
 		c.errorLock.Unlock()
 		if c.errorCallback != nil {
@@ -289,6 +291,7 @@ func (c *Stats) Errors() []error {
 // Close signals a shutdown, and blocks while waiting for a final flush, and all workers to shutdown.
 func (c *Stats) Close() {
 	c.Flush()
+	// TODO this will block indefinitely if called twice
 	c.shutdown <- true
 	c.wg.Wait()
 	c.flushWG.Wait()
