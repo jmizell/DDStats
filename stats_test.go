@@ -136,7 +136,7 @@ func NewTestStats() (*Stats, *TestAPIClient) {
 func NewTestStatsWithStart() (*Stats, *TestAPIClient) {
 	stats, testApi := NewTestStats()
 	go stats.start()
-	stats.Ready()
+	stats.blockReady()
 	return stats, testApi
 }
 

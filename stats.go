@@ -55,7 +55,8 @@ func NewStats(namespace, host, apiKey string, tags []string) *Stats {
 		ready:         make(chan bool, 1),
 		client:        NewDDClient(apiKey),
 	}
-	s.start()
+	go s.start()
+	s.blockReady()
 	return s
 }
 
@@ -129,8 +130,7 @@ func (c *Stats) start() {
 	}
 }
 
-// Ready blocks until initial setup is complete, and the client is ready to accept stats.
-func (c *Stats) Ready() {
+func (c *Stats) blockReady() {
 	<-c.ready
 }
 
