@@ -129,6 +129,7 @@ func (c *Stats) start() {
 	}
 }
 
+// Ready blocks until initial setup is complete, and the client is ready to accept stats.
 func (c *Stats) Ready() {
 	<-c.ready
 }
@@ -177,6 +178,9 @@ func (c *Stats) send(metrics map[string]*metric, flushTime time.Duration) {
 	}
 }
 
+// SendSeries immediately posts an DDMetric series to the Datadog api. Each metric in the series
+// is checked for an host name, and the correct namespace. If host, or namespace vales are missing,
+// the values will be filled before sending to the api. Global tags are added to all metrics.
 func (c *Stats) SendSeries(series []*DDMetric) error {
 	for _, m := range series {
 		if m.Host == "" {
@@ -188,6 +192,9 @@ func (c *Stats) SendSeries(series []*DDMetric) error {
 	return c.client.SendSeries(&DDMetricSeries{Series: series})
 }
 
+// ServiceCheck immediately posts an DDServiceCheck to he Datadog api. The namespace is
+// prepended to the check name, if it is missing. Host, and time is automatically added.
+// Global tags are appended to tags passed to the method.
 func (c *Stats) ServiceCheck(check, message string, status Status, tags []string) error {
 	return c.client.SendServiceCheck(&DDServiceCheck{
 		Check:     prependNamespace(c.namespace, check),
@@ -199,6 +206,8 @@ func (c *Stats) ServiceCheck(check, message string, status Status, tags []string
 	})
 }
 
+// Event immediately posts an DDEvent to he Datadog api. If host, or namespace vales are missing,
+// the values will be filled before sending to the api. Global tags are appended to the event.
 func (c *Stats) Event(event *DDEvent) error {
 	if event.Host == "" {
 		event.Host = c.host
@@ -208,14 +217,23 @@ func (c *Stats) Event(event *DDEvent) error {
 	return c.client.SendEvent(event)
 }
 
+// Increment creates or increments a count metric by +1. This is a non-blocking method, if
+// the channel buffer is full, then the metric not recorded. Count stats are sent as rate,
+// by taking the count value and dividing by the number of seconds since the last flush.
 func (c *Stats) Increment(name string, tags []string) {
 	c.Count(name, 1, tags)
 }
 
+// Decrement creates or subtracts a count metric by -1. This is a non-blocking method, if
+// the channel buffer is full, then the metric not recorded. Count stats are sent as rate,
+// by taking the count value and dividing by the number of seconds since the last flush.
 func (c *Stats) Decrement(name string, tags []string) {
 	c.Count(name, -1, tags)
 }
 
+// Count creates or adds a count metric by value. This is a non-blocking method, if
+// the channel buffer is full, then the metric not recorded. Count stats are sent as rate,
+// by taking the count value and dividing by the number of seconds since the last flush.
 func (c *Stats) Count(name string, value float64, tags []string) {
 	select {
 	case c.metricUpdates <- &metric{
@@ -228,6 +246,9 @@ func (c *Stats) Count(name string, value float64, tags []string) {
 	}
 }
 
+// Gauge creates or updates a gauge metric by value. This is a non-blocking method, if
+// the channel buffer is full, then the metric not recorded. Gauge stats are reported
+// as the last value sent before flush is called.
 func (c *Stats) Gauge(name string, value float64, tags []string) {
 	select {
 	case c.metricUpdates <- &metric{
@@ -240,18 +261,24 @@ func (c *Stats) Gauge(name string, value float64, tags []string) {
 	}
 }
 
+// Flush signals the main worker thread to copy all current metrics, and send them
+// to the Datadog api.
 func (c *Stats) Flush() {
 	c.flush <- true
 }
 
+// FlushCallback registers a call back function that will be called at the end of every successful flush.
 func (c *Stats) FlushCallback(f func(metrics map[string]*metric)) {
 	c.flushCallback = f
 }
 
+// ErrorCallback registers a call back function that will be called if any error is returned
+// by the api client during a flush.
 func (c *Stats) ErrorCallback(f func(err error)) {
 	c.errorCallback = f
 }
 
+// Errors returns a slice of all errors returned by the api client during a flush.
 func (c *Stats) Errors() []error {
 	c.errorLock.RLock()
 	defer c.errorLock.RUnlock()
@@ -259,6 +286,7 @@ func (c *Stats) Errors() []error {
 	return errs
 }
 
+// Close signals a shutdown, and blocks while waiting for a final flush, and all workers to shutdown.
 func (c *Stats) Close() {
 	c.Flush()
 	c.shutdown <- true
