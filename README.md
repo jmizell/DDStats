@@ -30,8 +30,8 @@ func main() {
 	// Count allows you to add an arbitrary value to a count metric.
 	stats.Count("metric1", 10, nil)
 
-	// Adding tags metrics are unique by name, and tags. Metric1 with nil
-	// tags, and metric1 with one custom tag, are stored as two separate values.
+	// Metrics are unique by name, and tags. Metric1 with nil tags, and
+	// metric1 with one custom tag, are stored as two separate values.
 	stats.Count("metric1", 10, []string{"tag:1"})
 
 	// Gauge creates a gauge metric. The last value applied to the metric before
