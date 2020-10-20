@@ -268,11 +268,7 @@ func (c *Stats) Close() {
 
 func prependNamespace(namespace, name string) string {
 
-	if namespace == "" {
-		return namespace
-	}
-
-	if strings.HasPrefix(name, namespace) {
+	if namespace == "" ||  strings.HasPrefix(name, namespace) {
 		return name
 	}
 
