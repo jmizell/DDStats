@@ -2,7 +2,6 @@ package DDStats
 
 import (
 	"fmt"
-	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +12,9 @@ type TestAPIClient struct {
 	checks []*DDServiceCheck
 	events []*DDEvent
 	lock   *sync.Mutex
+
+	sendEventError  error
+	sendSeriesError error
 }
 
 func NewTestAPIClient() *TestAPIClient {
@@ -28,7 +30,7 @@ func (t *TestAPIClient) SendSeries(series *DDMetricSeries) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.series = append(t.series, series)
-	return nil
+	return t.sendSeriesError
 }
 
 func (t *TestAPIClient) SendServiceCheck(check *DDServiceCheck) error {
@@ -42,10 +44,10 @@ func (t *TestAPIClient) SendEvent(event *DDEvent) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.events = append(t.events, event)
-	return nil
+	return t.sendEventError
 }
 
-func (t *TestAPIClient) SetHTTPClient(*http.Client) {}
+func (t *TestAPIClient) SetHTTPClient(client HTTPClient) {}
 
 func (t *TestAPIClient) FindMetric(callIndex int, ddMetric *DDMetric) error {
 
@@ -271,7 +273,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 	t.Run("count value 10", func(tt *testing.T) {
 		stats, testApi := NewTestStatsWithStart()
-		stats.Count("test",  10,nil)
+		stats.Count("test", 10, nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
@@ -286,7 +288,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 	t.Run("one gauge", func(tt *testing.T) {
 		stats, testApi := NewTestStatsWithStart()
-		stats.Gauge("test",  10,nil)
+		stats.Gauge("test", 10, nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
@@ -303,7 +305,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 	t.Run("one gauge and one increment", func(tt *testing.T) {
 		stats, testApi := NewTestStatsWithStart()
-		stats.Gauge("test2",  10,nil)
+		stats.Gauge("test2", 10, nil)
 		stats.Increment("test", nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
@@ -322,4 +324,207 @@ func TestStats_CountGauge(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 	})
+}
+
+func TestStats_Event(t *testing.T) {
+
+	testEvent := DDEvent{
+		AggregationKey: "testEvent",
+		AlertType:      AlertError,
+		DateHappened:   time.Now().Unix(),
+		DeviceName:     "device1",
+		Host:           "host1",
+		Priority:       PriorityNormal,
+		SourceTypeName: "",
+		Tags:           nil,
+		Title:          "",
+	}
+
+	t.Run("no error", func(tt *testing.T) {
+		stats, testApi := NewTestStats()
+		sendEvent := testEvent
+		if err := stats.Event(&sendEvent); err != nil {
+			tt.Fatalf("expected no error on send, have %s", err.Error())
+		}
+
+		if len(testApi.events) != 1 {
+			tt.Fatalf("expected %d calls to send events, have %d", 1, len(testApi.events))
+		}
+
+		if len(testApi.events[0].Tags) != 1 {
+			tt.Fatalf("expected %d tags, have %d", 1, len(testApi.events[0].Tags))
+		}
+
+		if testApi.events[0].Host != testEvent.Host {
+			tt.Fatalf("expected host to be %s, have %s", testEvent.Host, testApi.events[0].Host)
+		}
+
+		if testApi.events[0].AggregationKey != "testNamespace.testEvent" {
+			tt.Fatalf("expected AggregationKey to be %s, have %s", "testNamespace.testEvent", testApi.events[0].AggregationKey)
+		}
+	})
+
+	t.Run("error", func(tt *testing.T) {
+		stats, testApi := NewTestStats()
+		testApi.sendEventError = fmt.Errorf("test error")
+		sendEvent := testEvent
+		if err := stats.Event(&sendEvent); err == nil {
+			tt.Fatalf("expected error on send, have none")
+		}
+
+		if len(testApi.events) != 1 {
+			tt.Fatalf("expected %d calls to send events, have %d", 1, len(testApi.events))
+		}
+
+		if len(testApi.events[0].Tags) != 1 {
+			tt.Fatalf("expected %d tags, have %d", 1, len(testApi.events[0].Tags))
+		}
+
+		if testApi.events[0].Host != testEvent.Host {
+			tt.Fatalf("expected host to be %s, have %s", testEvent.Host, testApi.events[0].Host)
+		}
+
+		if testApi.events[0].AggregationKey != "testNamespace.testEvent" {
+			tt.Fatalf("expected AggregationKey to be %s, have %s", "testNamespace.testEvent", testApi.events[0].AggregationKey)
+		}
+	})
+}
+
+func TestStats_ServiceCheck(t *testing.T) {
+	t.Run("no error", func(tt *testing.T) {
+		stats, testApi := NewTestStats()
+		if err := stats.ServiceCheck("check1", "failed", Warning, nil); err != nil {
+			tt.Fatalf("expected no error on service check, have %s", err.Error())
+		}
+
+		if len(testApi.checks) != 1 {
+			tt.Fatalf("expected %d calls to send check, have %d", 1, len(testApi.checks))
+		}
+
+		if len(testApi.checks[0].Tags) != 1 {
+			tt.Fatalf("expected %d tags, have %d", 1, len(testApi.checks[0].Tags))
+		}
+
+		if testApi.checks[0].Hostname != "testHost" {
+			tt.Fatalf("expected host to be %s, have %s", "testHost", testApi.checks[0].Hostname)
+		}
+
+		if testApi.checks[0].Check != "testNamespace.check1" {
+			tt.Fatalf("expected check name to be %s, have %s", "testNamespace.check1", testApi.checks[0].Check)
+		}
+
+		if testApi.checks[0].Message != "failed" {
+			tt.Fatalf("expected check message to be %s, have %s", "failed", testApi.checks[0].Message)
+		}
+
+		if testApi.checks[0].Status != Warning {
+			tt.Fatalf("expected check message to be %d, have %d", Warning, testApi.checks[0].Status)
+		}
+	})
+}
+
+func TestStats_Errors(t *testing.T) {
+
+	t.Run("no error", func(tt *testing.T) {
+		stats, _ := NewTestStatsWithStart()
+
+		stats.flushWG.Add(1)
+		stats.send(
+			map[string]*metric{
+				"test": {
+					name:  "test",
+					class: metricGauge,
+					value: 10,
+				},
+			}, time.Second*10,
+		)
+
+		errors := stats.Errors()
+		if len(errors) != 0 {
+			tt.Fatalf("expected to find zero errors, have %d", len(errors))
+		}
+	})
+
+	t.Run("error", func(tt *testing.T) {
+		stats, testApi := NewTestStatsWithStart()
+		testApi.sendSeriesError = fmt.Errorf("failed sent")
+
+		stats.flushWG.Add(1)
+		stats.send(
+			map[string]*metric{
+				"test": {
+					name:  "test",
+					class: metricGauge,
+					value: 10,
+				},
+			}, time.Second*10,
+		)
+
+		errors := stats.Errors()
+		if len(errors) != 1 {
+			tt.Fatalf("expected to find 1 error, have %d", len(errors))
+		}
+
+		if errors[0].Error() != testApi.sendSeriesError.Error() {
+			tt.Fatalf("expected error to be %s, have %s", testApi.sendSeriesError.Error(), errors[0].Error())
+		}
+	})
+
+}
+
+func TestStats_ErrorCallback(t *testing.T) {
+
+	t.Run("no error", func(tt *testing.T) {
+		stats, _ := NewTestStatsWithStart()
+
+		var callbackError error
+		stats.ErrorCallback(func(err error) {
+			callbackError = err
+		})
+
+		stats.flushWG.Add(1)
+		stats.send(
+			map[string]*metric{
+				"test": {
+					name:  "test",
+					class: metricGauge,
+					value: 10,
+				},
+			}, time.Second*10,
+		)
+
+		if callbackError != nil {
+			tt.Fatalf("expected to have no error sent to the callback, have %s", callbackError.Error())
+		}
+	})
+
+	t.Run("error", func(tt *testing.T) {
+		stats, testApi := NewTestStatsWithStart()
+		testApi.sendSeriesError = fmt.Errorf("failed sent")
+
+		var callbackError error
+		stats.ErrorCallback(func(err error) {
+			callbackError = err
+		})
+
+		stats.flushWG.Add(1)
+		stats.send(
+			map[string]*metric{
+				"test": {
+					name:  "test",
+					class: metricGauge,
+					value: 10,
+				},
+			}, time.Second*10,
+		)
+
+		if callbackError == nil {
+			tt.Fatalf("expected to have call back called with error, have nil")
+		}
+
+		if callbackError.Error() != testApi.sendSeriesError.Error() {
+			tt.Fatalf("expected error to be %s, have %s", testApi.sendSeriesError.Error(), callbackError.Error())
+		}
+	})
+
 }

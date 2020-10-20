@@ -23,7 +23,7 @@ type APIClient interface {
 	SendSeries(*DDMetricSeries) error
 	SendServiceCheck(*DDServiceCheck) error
 	SendEvent(*DDEvent) error
-	SetHTTPClient(*http.Client)
+	SetHTTPClient(HTTPClient)
 }
 
 type HTTPClient interface {
@@ -42,7 +42,7 @@ func NewDDClient(apiKey string) *DDClient {
 	}
 }
 
-func (c *DDClient) SetHTTPClient(client *http.Client) {
+func (c *DDClient) SetHTTPClient(client HTTPClient) {
 	c.client = client
 }
 
@@ -78,10 +78,8 @@ func (c *DDClient) post(payload interface{}, encoding, url string) error {
 		return fmt.Errorf("could not read api response, %s", err.Error())
 	}
 
-	apiResponse := struct {
-		Errors []string `json:"errors"`
-	}{}
-	if err := json.Unmarshal(responseBytes, &apiResponse); err != nil {
+	apiResponse := &DDApiResponse{}
+	if err := json.Unmarshal(responseBytes, apiResponse); err != nil {
 		return fmt.Errorf("could not read api response, %s", err.Error())
 	}
 
@@ -90,4 +88,8 @@ func (c *DDClient) post(payload interface{}, encoding, url string) error {
 	}
 
 	return nil
+}
+
+type DDApiResponse struct {
+	Errors []string `json:"errors"`
 }
