@@ -1,10 +1,3 @@
-# DDStats
-DDStats is an non-DogStatsD client in Golang.
-
-[![GoDoc](https://godoc.org/github.com/jmizell/DDStats?status.svg)](https://godoc.org/github.com/jmizell/DDStats)
-
-## Example
-```go
 package main
 
 import (
@@ -52,4 +45,3 @@ func main() {
 		log.Fatalf("errors were founc")
 	}
 }
-```
