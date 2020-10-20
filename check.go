@@ -2,6 +2,7 @@ package DDStats
 
 type Status int
 
+// DDServiceCheck Status values
 const (
 	Okay = iota
 	Warning

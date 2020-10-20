@@ -4,6 +4,7 @@ import (
 	"time"
 )
 
+// DDMetric Type values
 const (
 	metricCount = "count"
 	metricGauge = "gauge"

@@ -2,6 +2,7 @@ package DDStats
 
 type AlertType string
 
+// DDEvent AlertType values
 const (
 	AlertError   = AlertType("error")
 	AlertWarning = AlertType("warning")
@@ -11,6 +12,7 @@ const (
 
 type Priority string
 
+// DDEvent Priority values
 const (
 	PriorityNormal = Priority("normal")
 	PriorityLow    = Priority("low")
