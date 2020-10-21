@@ -118,19 +118,26 @@ func (t *TestAPIClient) TestValidateCalls(seriesCalls []*DDMetricSeries, checkCa
 	return nil
 }
 
+const (
+	testNamespace = "testNamespace"
+	testHost = "testHost"
+)
+
+var testTags = []string{"tag:1"}
+
 func NewTestStats() (*Stats, *TestAPIClient) {
+
 	testClient := NewTestAPIClient()
-	return &Stats{
-		namespace:     "testNamespace",
-		host:          "testHost",
-		tags:          []string{"tag:1"},
-		flushInterval: time.Minute * 1,
-		workerCount:   2,
-		workerBuffer:  10,
-		metricBuffer:  10 * 2,
-		client:        testClient,
-		ready:         make(chan bool, 1),
-	}, testClient
+	s := NewStats(testNamespace, testHost, "", testTags)
+	s.Close()
+	s.flushInterval = time.Minute * 1
+	s.workerCount = 2
+	s.workerBuffer = 10
+	s.metricBuffer = 10 * 2
+	s.client = testClient
+	s.ready = make(chan bool, 1)
+
+	return s, testClient
 }
 
 func NewTestStatsWithStart() (*Stats, *TestAPIClient) {
@@ -184,7 +191,7 @@ func TestStats_SendSeries(t *testing.T) {
 func TestStats_CountGauge(t *testing.T) {
 
 	baseMetric := DDMetric{
-		Host:     "testHost",
+		Host:     testHost,
 		Metric:   "testNamespace.test",
 		Tags:     []string{"tag:1"},
 		Interval: 1,
@@ -405,8 +412,8 @@ func TestStats_ServiceCheck(t *testing.T) {
 			tt.Fatalf("expected %d tags, have %d", 1, len(testApi.checks[0].Tags))
 		}
 
-		if testApi.checks[0].Hostname != "testHost" {
-			tt.Fatalf("expected host to be %s, have %s", "testHost", testApi.checks[0].Hostname)
+		if testApi.checks[0].Hostname != testHost {
+			tt.Fatalf("expected host to be %s, have %s", testHost, testApi.checks[0].Hostname)
 		}
 
 		if testApi.checks[0].Check != "testNamespace.check1" {
