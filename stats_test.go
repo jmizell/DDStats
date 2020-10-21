@@ -120,7 +120,7 @@ func (t *TestAPIClient) TestValidateCalls(seriesCalls []*DDMetricSeries, checkCa
 
 const (
 	testNamespace = "testNamespace"
-	testHost = "testHost"
+	testHost      = "testHost"
 )
 
 var testTags = []string{"tag:1"}
@@ -485,7 +485,7 @@ func TestStats_ErrorCallback(t *testing.T) {
 		stats, _ := NewTestStatsWithStart()
 
 		var callbackError error
-		stats.ErrorCallback(func(err error) {
+		stats.ErrorCallback(func(err error, metricSeries []*DDMetric) {
 			callbackError = err
 		})
 
@@ -510,8 +510,10 @@ func TestStats_ErrorCallback(t *testing.T) {
 		testApi.sendSeriesError = fmt.Errorf("failed sent")
 
 		var callbackError error
-		stats.ErrorCallback(func(err error) {
+		var metricSeries []*DDMetric
+		stats.ErrorCallback(func(err error, m []*DDMetric) {
 			callbackError = err
+			metricSeries = m
 		})
 
 		stats.flushWG.Add(1)
@@ -531,6 +533,10 @@ func TestStats_ErrorCallback(t *testing.T) {
 
 		if callbackError.Error() != testApi.sendSeriesError.Error() {
 			tt.Fatalf("expected error to be %s, have %s", testApi.sendSeriesError.Error(), callbackError.Error())
+		}
+
+		if len(metricSeries) != 1 {
+			tt.Fatalf("expected %d metrics to be passed to call back, have %d", 1, len(metricSeries))
 		}
 	})
 

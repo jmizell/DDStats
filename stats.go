@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	DefaultMaxErrorCount = 100
 	DefaultWorkerCount   = 10
 	DefaultWorkerBuffer  = 100
 	DefaultFlushInterval = time.Second * 60
@@ -34,12 +35,13 @@ type Stats struct {
 	workers       []chan *job
 	shutdown      chan bool
 	flush         chan bool
-	wg            *sync.WaitGroup
+	workerWG      *sync.WaitGroup
 	flushWG       *sync.WaitGroup
 	ready         chan bool
 	flushCallback func(metrics map[string]*metric)
-	errorCallback func(err error)
+	errorCallback func(err error, metricSeries []*DDMetric)
 	errors        []error
+	maxErrors     int
 	errorLock     *sync.RWMutex
 }
 
@@ -53,6 +55,7 @@ func NewStats(namespace, host, apiKey string, tags []string) *Stats {
 		workerCount:   DefaultWorkerCount,
 		workerBuffer:  DefaultWorkerBuffer,
 		metricBuffer:  DefaultWorkerBuffer * DefaultWorkerCount,
+		maxErrors:     DefaultMaxErrorCount,
 		ready:         make(chan bool, 1),
 		client:        NewDDClient(apiKey),
 	}
@@ -63,24 +66,39 @@ func NewStats(namespace, host, apiKey string, tags []string) *Stats {
 
 func (c *Stats) start() {
 
+	// Setup our channels
+	c.shutdown = make(chan bool)
+	c.metricUpdates = make(chan *metric, c.metricBuffer)
+
+	// Setup wait group for workers. Flush wait group is separate as
+	// we don't want to block processing new stats, if a flush worker
+	// is running slow.
+	c.workerWG = &sync.WaitGroup{}
+	c.flushWG = &sync.WaitGroup{}
+
+	// Here we're tracking our errors
 	c.errors = []error{}
 	c.errorLock = &sync.RWMutex{}
+
+	// Setup our slice of map metrics. There is a separate map for each worker
+	// so we can avoid locking on storing metrics. This will be zeroed out at
+	// each flush cycle.
 	c.metrics = make([]map[string]*metric, c.workerCount)
 	for i := range c.metrics {
 		c.metrics[i] = map[string]*metric{}
 	}
-	c.metricUpdates = make(chan *metric, c.metricBuffer)
+
+	// Start our works, each worker has it's own channel.
 	c.workers = make([]chan *job, c.workerCount)
 	for i := 0; i < c.workerCount; i++ {
 		c.workers[i] = make(chan *job, c.workerBuffer)
 		go c.worker(c.workers[i], i)
 	}
-	c.shutdown = make(chan bool)
-	c.flush = make(chan bool)
-	c.wg = &sync.WaitGroup{}
-	c.flushWG = &sync.WaitGroup{}
 
+	// Start the flush worker. This will send a flush signal until given
+	// a shutdown signal.
 	cancelFlush := make(chan bool)
+	c.flush = make(chan bool)
 	go func() {
 		flush := time.NewTicker(c.flushInterval)
 		for {
@@ -89,43 +107,67 @@ func (c *Stats) start() {
 				c.flush <- true
 			case <-cancelFlush:
 				flush.Stop()
-				c.wg.Done()
+				c.workerWG.Done()
 				return
 			}
 		}
 	}()
 	c.ready <- true
 
+	// We need to track time between flushes. If a flush is called before the scheduled
+	// interval, we will need to know exactly how much time has passed, so we can calculate
+	// our rate metrics.
 	lastFlush := time.Now()
 	for {
 		select {
 		case metric := <-c.metricUpdates:
-			c.wg.Add(1)
+			// New metric has been sent, we want to add a job to the wait group, and
+			// then we assign it to the worker by using a FNV-1a hash. This should ensure
+			// that the same worker always sees the same metric.
+			c.workerWG.Add(1)
 			c.workers[fnv1a(metric.name)%uint32(len(c.workers))] <- &job{metric: metric}
 		case <-c.flush:
+
 			// TODO make non-blocking
-			c.wg.Wait()
+
+			// On a flush signal we need to wait for all current metrics to be processed
+			// by the workers
+			c.workerWG.Wait()
+
+			// We need to make a copy of all the metrics to a new data structure
 			flattenedMetrics := make(map[string]*metric)
 			for _, m := range c.metrics {
 				for k, v := range m {
 					flattenedMetrics[k] = v
 				}
 			}
+
+			// Then we zero out all of the metrics, and start with new values for the
+			// next flush interval.
 			for i := range c.metrics {
 				c.metrics[i] = map[string]*metric{}
 			}
+
+			// Update the flush interval, add a job to the flush wait group, and send
+			// the metrics to the flush worker.
 			interval := time.Since(lastFlush)
 			c.flushWG.Add(1)
 			go c.send(flattenedMetrics, interval)
 			lastFlush = time.Now()
 		case <-c.shutdown:
+
+			// On shutdown, we'll signal all the workers to exit after completing the current job
 			for i := range c.workers {
-				c.wg.Add(1)
+				c.workerWG.Add(1)
 				c.workers[i] <- &job{shutdown: true}
 			}
-			c.wg.Add(1)
+
+			// Signal to the flush worker to shutdown
+			c.workerWG.Add(1)
 			cancelFlush <- true
-			c.wg.Wait()
+
+			// Finally wait for the workers to shutdown before returning
+			c.workerWG.Wait()
 			return
 		}
 	}
@@ -139,17 +181,26 @@ func (c *Stats) worker(jobs chan *job, id int) {
 	for {
 		job := <-jobs
 		if job.shutdown {
-			c.wg.Done()
+			c.workerWG.Done()
 			return
 		}
 
+		// Metrics are indexed by a combination of the metric name, and the list
+		// of tags. Order of the tags sent to the job shouldn't matter, as we
+		// sort them, before creating the index key.
 		key := metricKey(job.metric.name, job.metric.tags)
+
+		// Store or update the metric
 		if _, ok := c.metrics[id][key]; ok {
 			c.metrics[id][key].update(job.metric.value)
 		} else {
 			c.metrics[id][key] = job.metric
 		}
-		c.wg.Done()
+
+		// Signalling done, allows us to track if any jobs are being worked on,
+		// in order for us to avoid concurrent access to the metrics map on a
+		// flush operation.
+		c.workerWG.Done()
 	}
 }
 
@@ -167,11 +218,10 @@ func (c *Stats) send(metrics map[string]*metric, flushTime time.Duration) {
 	}
 	if err := c.SendSeries(metricsSeries); err != nil {
 		c.errorLock.Lock()
-		// TODO keep this list from growing large, cap size
-		c.errors = append(c.errors, err)
+		c.errors = appendErrorsList(c.errors, err, c.maxErrors)
 		c.errorLock.Unlock()
 		if c.errorCallback != nil {
-			c.errorCallback(err)
+			c.errorCallback(err, metricsSeries)
 		}
 	}
 
@@ -220,21 +270,21 @@ func (c *Stats) Event(event *DDEvent) error {
 }
 
 // Increment creates or increments a count metric by +1. This is a non-blocking method, if
-// the channel buffer is full, then the metric not recorded. Count stats are sent as rate,
+// the channel buffer is full, then the metric is not recorded. Count stats are sent as rate,
 // by taking the count value and dividing by the number of seconds since the last flush.
 func (c *Stats) Increment(name string, tags []string) {
 	c.Count(name, 1, tags)
 }
 
 // Decrement creates or subtracts a count metric by -1. This is a non-blocking method, if
-// the channel buffer is full, then the metric not recorded. Count stats are sent as rate,
+// the channel buffer is full, then the metric is not recorded. Count stats are sent as rate,
 // by taking the count value and dividing by the number of seconds since the last flush.
 func (c *Stats) Decrement(name string, tags []string) {
 	c.Count(name, -1, tags)
 }
 
 // Count creates or adds a count metric by value. This is a non-blocking method, if
-// the channel buffer is full, then the metric not recorded. Count stats are sent as rate,
+// the channel buffer is full, then the metric is not recorded. Count stats are sent as rate,
 // by taking the count value and dividing by the number of seconds since the last flush.
 func (c *Stats) Count(name string, value float64, tags []string) {
 	select {
@@ -276,7 +326,7 @@ func (c *Stats) FlushCallback(f func(metrics map[string]*metric)) {
 
 // ErrorCallback registers a call back function that will be called if any error is returned
 // by the api client during a flush.
-func (c *Stats) ErrorCallback(f func(err error)) {
+func (c *Stats) ErrorCallback(f func(err error, metricSeries []*DDMetric)) {
 	c.errorCallback = f
 }
 
@@ -293,13 +343,13 @@ func (c *Stats) Close() {
 	c.Flush()
 	// TODO this will block indefinitely if called twice
 	c.shutdown <- true
-	c.wg.Wait()
+	c.workerWG.Wait()
 	c.flushWG.Wait()
 }
 
 func prependNamespace(namespace, name string) string {
 
-	if namespace == "" ||  strings.HasPrefix(name, namespace) {
+	if namespace == "" || strings.HasPrefix(name, namespace) {
 		return name
 	}
 
@@ -316,6 +366,8 @@ func combineTags(tags1, tags2 []string) []string {
 		return tags1
 	}
 
+	// Tags should be unique, duplicate tags should be filtered
+	// out of the list
 	uniqueTags := make(map[string]bool)
 	for _, tag := range append(tags1, tags2...) {
 		uniqueTags[tag] = true
@@ -330,6 +382,10 @@ func combineTags(tags1, tags2 []string) []string {
 }
 
 func metricKey(name string, tags []string) string {
+
+	// We have to sort the tags, in order to generate a consistent key.
+	// If a user swaps the order of a key, we don't want to store that
+	// metric as new metric.
 	sort.Strings(tags)
 	return fmt.Sprintf("%s%s", name, strings.Join(tags, ""))
 }
@@ -338,4 +394,13 @@ func fnv1a(v string) uint32 {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(v))
 	return h.Sum32()
+}
+
+func appendErrorsList(errors []error, err error, max int) []error {
+
+	if len(errors) >= max {
+		errors = errors[1:]
+	}
+
+	return append(errors, err)
 }

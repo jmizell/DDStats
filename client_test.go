@@ -12,12 +12,12 @@ import (
 )
 
 type testHTTPClient struct {
-	callURL string
+	callURL         string
 	callContentType string
-	callBody []byte
+	callBody        []byte
 
 	response *http.Response
-	error error
+	error    error
 }
 
 func newTestHTTPClient(status int, apiError string, err error) *testHTTPClient {
@@ -31,8 +31,8 @@ func newTestHTTPClient(status int, apiError string, err error) *testHTTPClient {
 	return &testHTTPClient{
 		error: err,
 		response: &http.Response{
-			StatusCode:       status,
-			Body:             ioutil.NopCloser(bytes.NewReader(data)),
+			StatusCode: status,
+			Body:       ioutil.NopCloser(bytes.NewReader(data)),
 		},
 	}
 }
