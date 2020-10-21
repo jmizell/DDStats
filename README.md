@@ -1,5 +1,5 @@
 # DDStats
-DDStats is an non-DogStatsD client in Golang.
+DDStats is a non-statsd DataDog stats client written in go. 
 
 [![GoDoc](https://godoc.org/github.com/jmizell/DDStats?status.svg)](https://godoc.org/github.com/jmizell/DDStats)
 [![Build Status](https://travis-ci.org/jmizell/DDStats.svg?branch=master)](https://travis-ci.org/jmizell/DDStats)
