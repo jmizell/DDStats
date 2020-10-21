@@ -3,6 +3,7 @@ DDStats is an non-DogStatsD client in Golang.
 
 [![GoDoc](https://godoc.org/github.com/jmizell/DDStats?status.svg)](https://godoc.org/github.com/jmizell/DDStats)
 [![Build Status](https://travis-ci.org/jmizell/DDStats.svg?branch=master)](https://travis-ci.org/jmizell/DDStats)
+[![Coverage Status](https://coveralls.io/repos/github/jmizell/DDStats/badge.svg?branch=master)](https://coveralls.io/github/jmizell/DDStats?branch=master)
 
 ## Example
 ```go
