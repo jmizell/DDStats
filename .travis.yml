@@ -1,0 +1,9 @@
+language: go
+
+go:
+  - 1.14.x
+
+jobs:
+  include:
+    - stage: test
+      script: go test -cover -v ./...
