@@ -1,4 +1,4 @@
-package ddstats
+package client
 
 type Status int
 

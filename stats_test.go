@@ -5,12 +5,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jmizell/ddstats/client"
 )
 
 type TestAPIClient struct {
-	series []*DDMetricSeries
-	checks []*DDServiceCheck
-	events []*DDEvent
+	series []*client.DDMetricSeries
+	checks []*client.DDServiceCheck
+	events []*client.DDEvent
 	lock   *sync.Mutex
 
 	sendEventError  error
@@ -19,37 +21,37 @@ type TestAPIClient struct {
 
 func NewTestAPIClient() *TestAPIClient {
 	return &TestAPIClient{
-		series: []*DDMetricSeries{},
-		checks: []*DDServiceCheck{},
-		events: []*DDEvent{},
+		series: []*client.DDMetricSeries{},
+		checks: []*client.DDServiceCheck{},
+		events: []*client.DDEvent{},
 		lock:   &sync.Mutex{},
 	}
 }
 
-func (t *TestAPIClient) SendSeries(series *DDMetricSeries) error {
+func (t *TestAPIClient) SendSeries(series *client.DDMetricSeries) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.series = append(t.series, series)
 	return t.sendSeriesError
 }
 
-func (t *TestAPIClient) SendServiceCheck(check *DDServiceCheck) error {
+func (t *TestAPIClient) SendServiceCheck(check *client.DDServiceCheck) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.checks = append(t.checks, check)
 	return nil
 }
 
-func (t *TestAPIClient) SendEvent(event *DDEvent) error {
+func (t *TestAPIClient) SendEvent(event *client.DDEvent) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.events = append(t.events, event)
 	return t.sendEventError
 }
 
-func (t *TestAPIClient) SetHTTPClient(client HTTPClient) {}
+func (t *TestAPIClient) SetHTTPClient(client client.HTTPClient) {}
 
-func (t *TestAPIClient) FindMetric(callIndex int, ddMetric *DDMetric) error {
+func (t *TestAPIClient) FindMetric(callIndex int, ddMetric *client.DDMetric) error {
 
 	if callIndex > len(t.series)-1 {
 		return fmt.Errorf("")
@@ -93,7 +95,7 @@ func (t *TestAPIClient) FindMetric(callIndex int, ddMetric *DDMetric) error {
 	return fmt.Errorf("could not find metric in calls")
 }
 
-func (t *TestAPIClient) TestValidateCalls(seriesCalls []*DDMetricSeries, checkCalls, eventCalls int) error {
+func (t *TestAPIClient) TestValidateCalls(seriesCalls []*client.DDMetricSeries, checkCalls, eventCalls int) error {
 
 	if len(t.series) != len(seriesCalls) {
 		return fmt.Errorf("expected %d calls to SendSeries, have %d", len(seriesCalls), len(t.series))
@@ -152,14 +154,14 @@ func TestStats_SendSeries(t *testing.T) {
 	t.Run("one metric", func(tt *testing.T) {
 		stats, testApi := NewTestStats()
 
-		metrics := []*DDMetric{
+		metrics := []*client.DDMetric{
 			{
 				Host:     "testHost2",
 				Interval: 10,
 				Metric:   "metric1",
 				Points:   [][2]interface{}{{1, 2}},
 				Tags:     []string{"tag:2"},
-				Type:     metricCount,
+				Type:     client.Count,
 			},
 		}
 
@@ -167,15 +169,15 @@ func TestStats_SendSeries(t *testing.T) {
 			tt.Fatalf("send returned err, %s", err.Error())
 		}
 
-		seriesCalls := []*DDMetricSeries{
+		seriesCalls := []*client.DDMetricSeries{
 			{
-				Series: []*DDMetric{
+				Series: []*client.DDMetric{
 					{
 						Host:     "testHost2",
 						Metric:   "testNamespace.metric1",
 						Tags:     []string{"tag:2", "tag:1"},
 						Interval: 10,
-						Type:     metricCount,
+						Type:     client.Count,
 						Points:   [][2]interface{}{{1, 2}},
 					},
 				},
@@ -190,12 +192,12 @@ func TestStats_SendSeries(t *testing.T) {
 
 func TestStats_CountGauge(t *testing.T) {
 
-	baseMetric := DDMetric{
+	baseMetric := client.DDMetric{
 		Host:     testHost,
 		Metric:   "testNamespace.test",
 		Tags:     []string{"tag:1"},
 		Interval: 1,
-		Type:     metricCount,
+		Type:     client.Count,
 	}
 
 	t.Run("one increment", func(tt *testing.T) {
@@ -206,7 +208,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 		m1 := baseMetric
 		m1.Points = [][2]interface{}{{1, float64(1)}}
-		seriesCalls := []*DDMetricSeries{{Series: []*DDMetric{&m1}}}
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
 			tt.Fatalf(err.Error())
@@ -222,7 +224,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 		m1 := baseMetric
 		m1.Points = [][2]interface{}{{1, float64(2)}}
-		seriesCalls := []*DDMetricSeries{{Series: []*DDMetric{&m1}}}
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
 			tt.Fatalf(err.Error())
@@ -237,7 +239,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 		m1 := baseMetric
 		m1.Points = [][2]interface{}{{1, float64(-1)}}
-		seriesCalls := []*DDMetricSeries{{Series: []*DDMetric{&m1}}}
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
 			tt.Fatalf(err.Error())
@@ -253,7 +255,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 		m1 := baseMetric
 		m1.Points = [][2]interface{}{{1, float64(-2)}}
-		seriesCalls := []*DDMetricSeries{{Series: []*DDMetric{&m1}}}
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
 			tt.Fatalf(err.Error())
@@ -271,7 +273,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 		m1 := baseMetric
 		m1.Points = [][2]interface{}{{1, float64(2)}}
-		seriesCalls := []*DDMetricSeries{{Series: []*DDMetric{&m1}}}
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
 			tt.Fatalf(err.Error())
@@ -286,7 +288,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 		m1 := baseMetric
 		m1.Points = [][2]interface{}{{1, float64(10)}}
-		seriesCalls := []*DDMetricSeries{{Series: []*DDMetric{&m1}}}
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
 			tt.Fatalf(err.Error())
@@ -301,9 +303,9 @@ func TestStats_CountGauge(t *testing.T) {
 
 		m1 := baseMetric
 		m1.Points = [][2]interface{}{{1, float64(10)}}
-		m1.Type = metricGauge
+		m1.Type = client.Gauge
 		m1.Interval = 0
-		seriesCalls := []*DDMetricSeries{{Series: []*DDMetric{&m1}}}
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
 			tt.Fatalf(err.Error())
@@ -323,9 +325,9 @@ func TestStats_CountGauge(t *testing.T) {
 		m1 := baseMetric
 		m1.Points = [][2]interface{}{{1, float64(10)}}
 		m1.Metric = "testNamespace.test2"
-		m1.Type = metricGauge
+		m1.Type = client.Gauge
 		m1.Interval = 0
-		seriesCalls := []*DDMetricSeries{{Series: []*DDMetric{&m1, &m2}}}
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1, &m2}}}
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
 			tt.Fatalf(err.Error())
@@ -335,13 +337,13 @@ func TestStats_CountGauge(t *testing.T) {
 
 func TestStats_Event(t *testing.T) {
 
-	testEvent := DDEvent{
+	testEvent := client.DDEvent{
 		AggregationKey: "testEvent",
-		AlertType:      AlertError,
+		AlertType:      client.AlertError,
 		DateHappened:   time.Now().Unix(),
 		DeviceName:     "device1",
 		Host:           "host1",
-		Priority:       PriorityNormal,
+		Priority:       client.PriorityNormal,
 		SourceTypeName: "",
 		Tags:           nil,
 		Title:          "",
@@ -400,7 +402,7 @@ func TestStats_Event(t *testing.T) {
 func TestStats_ServiceCheck(t *testing.T) {
 	t.Run("no error", func(tt *testing.T) {
 		stats, testApi := NewTestStats()
-		if err := stats.ServiceCheck("check1", "failed", Warning, nil); err != nil {
+		if err := stats.ServiceCheck("check1", "failed", client.Warning, nil); err != nil {
 			tt.Fatalf("expected no error on service check, have %s", err.Error())
 		}
 
@@ -424,8 +426,8 @@ func TestStats_ServiceCheck(t *testing.T) {
 			tt.Fatalf("expected check message to be %s, have %s", "failed", testApi.checks[0].Message)
 		}
 
-		if testApi.checks[0].Status != Warning {
-			tt.Fatalf("expected check message to be %d, have %d", Warning, testApi.checks[0].Status)
+		if testApi.checks[0].Status != client.Warning {
+			tt.Fatalf("expected check message to be %d, have %d", client.Warning, testApi.checks[0].Status)
 		}
 	})
 }
@@ -440,7 +442,7 @@ func TestStats_Errors(t *testing.T) {
 			map[string]*metric{
 				"test": {
 					name:  "test",
-					class: metricGauge,
+					class: client.Gauge,
 					value: 10,
 				},
 			}, time.Second*10,
@@ -461,7 +463,7 @@ func TestStats_Errors(t *testing.T) {
 			map[string]*metric{
 				"test": {
 					name:  "test",
-					class: metricGauge,
+					class: client.Gauge,
 					value: 10,
 				},
 			}, time.Second*10,
@@ -485,7 +487,7 @@ func TestStats_ErrorCallback(t *testing.T) {
 		stats, _ := NewTestStatsWithStart()
 
 		var callbackError error
-		stats.ErrorCallback(func(err error, metricSeries []*DDMetric) {
+		stats.ErrorCallback(func(err error, metricSeries []*client.DDMetric) {
 			callbackError = err
 		})
 
@@ -494,7 +496,7 @@ func TestStats_ErrorCallback(t *testing.T) {
 			map[string]*metric{
 				"test": {
 					name:  "test",
-					class: metricGauge,
+					class: client.Gauge,
 					value: 10,
 				},
 			}, time.Second*10,
@@ -510,8 +512,8 @@ func TestStats_ErrorCallback(t *testing.T) {
 		testApi.sendSeriesError = fmt.Errorf("failed sent")
 
 		var callbackError error
-		var metricSeries []*DDMetric
-		stats.ErrorCallback(func(err error, m []*DDMetric) {
+		var metricSeries []*client.DDMetric
+		stats.ErrorCallback(func(err error, m []*client.DDMetric) {
 			callbackError = err
 			metricSeries = m
 		})
@@ -521,7 +523,7 @@ func TestStats_ErrorCallback(t *testing.T) {
 			map[string]*metric{
 				"test": {
 					name:  "test",
-					class: metricGauge,
+					class: client.Gauge,
 					value: 10,
 				},
 			}, time.Second*10,
