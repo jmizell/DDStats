@@ -2,26 +2,9 @@ package ddstats
 
 import (
 	"time"
+
+	"github.com/jmizell/ddstats/client"
 )
-
-// DDMetric Type values
-const (
-	metricCount = "count"
-	metricGauge = "gauge"
-)
-
-type DDMetric struct {
-	Host     string           `json:"host"`
-	Interval int64            `json:"interval"`
-	Metric   string           `json:"metric"`
-	Points   [][2]interface{} `json:"points"`
-	Tags     []string         `json:"tags"`
-	Type     string           `json:"type"`
-}
-
-type DDMetricSeries struct {
-	Series []*DDMetric `json:"series"`
-}
 
 type metric struct {
 	name  string
@@ -32,24 +15,24 @@ type metric struct {
 
 func (m *metric) update(v float64) {
 	switch m.class {
-	case metricGauge:
+	case client.Gauge:
 		m.value = v
-	case metricCount:
+	case client.Count:
 		m.value += v
 	}
 }
 
-func (m *metric) getMetric(namespace, host string, tags []string, interval time.Duration) *DDMetric {
-	metric := &DDMetric{
+func (m *metric) getMetric(namespace, host string, tags []string, interval time.Duration) *client.DDMetric {
+	metric := &client.DDMetric{
 		Host:   host,
 		Metric: prependNamespace(namespace, m.name),
 		Tags:   combineTags(m.tags, tags),
 		Type:   m.class,
 	}
 	switch m.class {
-	case metricGauge:
+	case client.Gauge:
 		metric.Points = [][2]interface{}{{time.Now().Unix(), m.value}}
-	case metricCount:
+	case client.Count:
 		metric.Interval = int64(interval.Seconds())
 		if metric.Interval == 0 {
 			metric.Interval = 1

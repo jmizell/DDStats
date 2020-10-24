@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jmizell/ddstats/client"
 )
 
 const (
@@ -29,7 +31,7 @@ type Stats struct {
 	workerCount   int
 	workerBuffer  int
 	metricBuffer  int
-	client        APIClient
+	client        client.APIClient
 	metrics       []map[string]*metric
 	metricUpdates chan *metric
 	workers       []chan *job
@@ -39,7 +41,7 @@ type Stats struct {
 	flushWG       *sync.WaitGroup
 	ready         chan bool
 	flushCallback func(metrics map[string]*metric)
-	errorCallback func(err error, metricSeries []*DDMetric)
+	errorCallback func(err error, metricSeries []*client.DDMetric)
 	errors        []error
 	maxErrors     int
 	errorLock     *sync.RWMutex
@@ -57,7 +59,7 @@ func NewStats(namespace, host, apiKey string, tags []string) *Stats {
 		metricBuffer:  DefaultWorkerBuffer * DefaultWorkerCount,
 		maxErrors:     DefaultMaxErrorCount,
 		ready:         make(chan bool, 1),
-		client:        NewDDClient(apiKey),
+		client:        client.NewDDClient(apiKey),
 	}
 	go s.start()
 	s.blockReady()
@@ -212,7 +214,7 @@ func (c *Stats) send(metrics map[string]*metric, flushTime time.Duration) {
 		return
 	}
 
-	metricsSeries := make([]*DDMetric, 0, len(metrics))
+	metricsSeries := make([]*client.DDMetric, 0, len(metrics))
 	for _, m := range metrics {
 		metricsSeries = append(metricsSeries, m.getMetric(c.namespace, c.host, c.tags, flushTime))
 	}
@@ -233,7 +235,7 @@ func (c *Stats) send(metrics map[string]*metric, flushTime time.Duration) {
 // SendSeries immediately posts an DDMetric series to the Datadog api. Each metric in the series
 // is checked for an host name, and the correct namespace. If host, or namespace vales are missing,
 // the values will be filled before sending to the api. Global tags are added to all metrics.
-func (c *Stats) SendSeries(series []*DDMetric) error {
+func (c *Stats) SendSeries(series []*client.DDMetric) error {
 	for _, m := range series {
 		if m.Host == "" {
 			m.Host = c.host
@@ -241,14 +243,14 @@ func (c *Stats) SendSeries(series []*DDMetric) error {
 		m.Metric = prependNamespace(c.namespace, m.Metric)
 		m.Tags = combineTags(c.tags, m.Tags)
 	}
-	return c.client.SendSeries(&DDMetricSeries{Series: series})
+	return c.client.SendSeries(&client.DDMetricSeries{Series: series})
 }
 
 // ServiceCheck immediately posts an DDServiceCheck to he Datadog api. The namespace is
 // prepended to the check name, if it is missing. Host, and time is automatically added.
 // Global tags are appended to tags passed to the method.
-func (c *Stats) ServiceCheck(check, message string, status Status, tags []string) error {
-	return c.client.SendServiceCheck(&DDServiceCheck{
+func (c *Stats) ServiceCheck(check, message string, status client.Status, tags []string) error {
+	return c.client.SendServiceCheck(&client.DDServiceCheck{
 		Check:     prependNamespace(c.namespace, check),
 		Hostname:  c.host,
 		Message:   message,
@@ -260,7 +262,7 @@ func (c *Stats) ServiceCheck(check, message string, status Status, tags []string
 
 // Event immediately posts an DDEvent to he Datadog api. If host, or namespace vales are missing,
 // the values will be filled before sending to the api. Global tags are appended to the event.
-func (c *Stats) Event(event *DDEvent) error {
+func (c *Stats) Event(event *client.DDEvent) error {
 	if event.Host == "" {
 		event.Host = c.host
 	}
@@ -290,7 +292,7 @@ func (c *Stats) Count(name string, value float64, tags []string) {
 	select {
 	case c.metricUpdates <- &metric{
 		name:  name,
-		class: metricCount,
+		class: client.Count,
 		value: value,
 		tags:  tags,
 	}:
@@ -305,7 +307,7 @@ func (c *Stats) Gauge(name string, value float64, tags []string) {
 	select {
 	case c.metricUpdates <- &metric{
 		name:  name,
-		class: metricGauge,
+		class: client.Gauge,
 		value: value,
 		tags:  tags,
 	}:
@@ -326,7 +328,7 @@ func (c *Stats) FlushCallback(f func(metrics map[string]*metric)) {
 
 // ErrorCallback registers a call back function that will be called if any error is returned
 // by the api client during a flush.
-func (c *Stats) ErrorCallback(f func(err error, metricSeries []*DDMetric)) {
+func (c *Stats) ErrorCallback(f func(err error, metricSeries []*client.DDMetric)) {
 	c.errorCallback = f
 }
 
