@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/jmizell/DDStats"
+	"github.com/jmizell/ddstats"
 	"log"
 )
 

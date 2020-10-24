@@ -1,4 +1,4 @@
-package DDStats
+package ddstats
 
 import (
 	"bytes"
