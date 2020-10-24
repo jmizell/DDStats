@@ -1,4 +1,4 @@
-module github.com/jmizell/DDStats
+module github.com/jmizell/ddstats
 
 go 1.14
 

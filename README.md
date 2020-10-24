@@ -1,23 +1,23 @@
 # DDStats
 DDStats is a non-statsd DataDog stats client written in go. 
 
-[![GoDoc](https://godoc.org/github.com/jmizell/DDStats?status.svg)](https://godoc.org/github.com/jmizell/DDStats)
-[![Build Status](https://travis-ci.org/jmizell/DDStats.svg?branch=master)](https://travis-ci.org/jmizell/DDStats)
-[![Coverage Status](https://coveralls.io/repos/github/jmizell/DDStats/badge.svg?branch=master)](https://coveralls.io/github/jmizell/DDStats?branch=master)
+[![GoDoc](https://godoc.org/github.com/jmizell/ddstats?status.svg)](https://godoc.org/github.com/jmizell/ddstats)
+[![Build Status](https://travis-ci.org/jmizell/ddstats.svg?branch=master)](https://travis-ci.org/jmizell/ddstats)
+[![Coverage Status](https://coveralls.io/repos/github/jmizell/ddstats/badge.svg?branch=master)](https://coveralls.io/github/jmizell/ddstats?branch=master)
 
 ## Example
 ```go
 package main
 
 import (
-	"github.com/jmizell/DDStats"
+	"github.com/jmizell/ddstats"
 	"log"
 )
 
 func main() {
 
 	// Initialize the client with your namespace, host, api key, and your global tags
-	stats := DDStats.NewStats("namespace", "host", "api_key", []string{"custom_tag:true"})
+	stats := ddstats.NewStats("namespace", "host", "api_key", []string{"custom_tag:true"})
 
 	// We can add a new metric by calling any of the methods, Increment,
 	// Decrement, Count or Gauge. Increment increases a count metric by one.
