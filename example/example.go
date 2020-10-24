@@ -8,7 +8,7 @@ import (
 func main() {
 
 	// Initialize the client with your namespace, host, api key, and your global tags
-	stats := DDStats.NewStats("namespace", "host", "api_key", []string{"custom_tag:true"})
+	stats := ddstats.NewStats("namespace", "host", "api_key", []string{"custom_tag:true"})
 
 	// We can add a new metric by calling any of the methods, Increment,
 	// Decrement, Count or Gauge. Increment increases a count metric by one.
