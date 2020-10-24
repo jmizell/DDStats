@@ -130,16 +130,18 @@ var testTags = []string{"tag:1"}
 func NewTestStats() (*Stats, *TestAPIClient) {
 
 	testClient := NewTestAPIClient()
-	s := NewStats(testNamespace, testHost, "", testTags)
-	s.Close()
-	s.flushInterval = time.Minute * 1
-	s.workerCount = 2
-	s.workerBuffer = 10
-	s.metricBuffer = 10 * 2
-	s.client = testClient
-	s.ready = make(chan bool, 1)
 
-	return s, testClient
+	cfg := NewConfig().
+		WithNamespace(testNamespace).
+		WithHost(testHost).
+		WithTags(testTags).
+		WithClient(testClient)
+	cfg.WorkerBuffer = 10
+	cfg.WorkerCount = 2
+	cfg.MetricBuffer = 10 * 2
+	cfg.FlushIntervalSeconds = 60
+
+	return NewStats(cfg), testClient
 }
 
 func NewTestStatsWithStart() (*Stats, *TestAPIClient) {

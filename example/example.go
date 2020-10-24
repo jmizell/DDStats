@@ -7,8 +7,16 @@ import (
 
 func main() {
 
+	// Create a config with parameters, or use the FromEnv method to
+	// load config from environment variables.
+	cfg := ddstats.NewConfig().
+		WithNamespace("my-namespace").
+		WithHost("myhost.local").
+		WithAPIKey("api_key").
+		WithTags([]string{"custom_tag:true"})
+
 	// Initialize the client with your namespace, host, api key, and your global tags
-	stats := ddstats.NewStats("namespace", "host", "api_key", []string{"custom_tag:true"})
+	stats := ddstats.NewStats(cfg)
 
 	// We can add a new metric by calling any of the methods, Increment,
 	// Decrement, Count or Gauge. Increment increases a count metric by one.

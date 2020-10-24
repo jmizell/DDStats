@@ -11,13 +11,6 @@ import (
 	"github.com/jmizell/ddstats/client"
 )
 
-const (
-	DefaultMaxErrorCount = 100
-	DefaultWorkerCount   = 10
-	DefaultWorkerBuffer  = 100
-	DefaultFlushInterval = time.Second * 60
-)
-
 type job struct {
 	metric   *metric
 	shutdown bool
@@ -47,20 +40,26 @@ type Stats struct {
 	errorLock     *sync.RWMutex
 }
 
-func NewStats(namespace, host, apiKey string, tags []string) *Stats {
-	// TODO implement config options
+func NewStats(cfg *Config) *Stats {
+
 	s := &Stats{
-		namespace:     namespace,
-		host:          host,
-		tags:          tags,
-		flushInterval: DefaultFlushInterval,
-		workerCount:   DefaultWorkerCount,
-		workerBuffer:  DefaultWorkerBuffer,
-		metricBuffer:  DefaultWorkerBuffer * DefaultWorkerCount,
-		maxErrors:     DefaultMaxErrorCount,
+		namespace:     cfg.Namespace,
+		host:          cfg.Host,
+		tags:          cfg.Tags,
+		flushInterval: time.Duration(cfg.FlushIntervalSeconds) * time.Second,
+		workerCount:   cfg.WorkerCount,
+		workerBuffer:  cfg.WorkerBuffer,
+		metricBuffer:  cfg.MetricBuffer,
+		maxErrors:     cfg.MaxErrors,
 		ready:         make(chan bool, 1),
-		client:        client.NewDDClient(apiKey),
 	}
+
+	if cfg.client != nil {
+		s.client = cfg.client
+	} else if cfg.APIKey != "" {
+		s.client = client.NewDDClient(cfg.APIKey)
+	}
+
 	go s.start()
 	s.blockReady()
 	return s
