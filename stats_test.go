@@ -545,3 +545,21 @@ func TestStats_ErrorCallback(t *testing.T) {
 	})
 
 }
+
+func TestStats_GetDroppedMetricCount(t *testing.T) {
+	stats := &Stats{
+		metricUpdates: make(chan *metric, 2),
+	}
+
+	if stats.GetDroppedMetricCount() != 0 {
+		t.Fatalf("expected GetDroppedMetricCount to be %d, have %d", 0, stats.GetDroppedMetricCount())
+	}
+
+	stats.Increment("one", nil)
+	stats.Increment("one", nil)
+	stats.Increment("one", nil)
+
+	if stats.GetDroppedMetricCount() != 1 {
+		t.Fatalf("expected GetDroppedMetricCount to be %d, have %d", 1, stats.GetDroppedMetricCount())
+	}
+}

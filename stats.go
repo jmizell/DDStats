@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jmizell/ddstats/client"
@@ -38,6 +39,7 @@ type Stats struct {
 	errors        []error
 	maxErrors     int
 	errorLock     *sync.RWMutex
+	dropped       uint64
 }
 
 func NewStats(cfg *Config) *Stats {
@@ -296,6 +298,7 @@ func (c *Stats) Count(name string, value float64, tags []string) {
 		tags:  tags,
 	}:
 	default:
+		atomic.AddUint64(&c.dropped, 1)
 	}
 }
 
@@ -311,7 +314,14 @@ func (c *Stats) Gauge(name string, value float64, tags []string) {
 		tags:  tags,
 	}:
 	default:
+		atomic.AddUint64(&c.dropped, 1)
 	}
+}
+
+// GetDroppedMetricCount returns the number off metrics submitted to the metric queue,
+// and where dropped because the queue was full.
+func (c *Stats) GetDroppedMetricCount() uint64 {
+	return atomic.LoadUint64(&c.dropped)
 }
 
 // Flush signals the main worker thread to copy all current metrics, and send them
