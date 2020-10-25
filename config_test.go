@@ -61,3 +61,11 @@ func TestConfig_FromEnv(t *testing.T) {
 		t.Fatalf("expected Tags[1] to be %s, have %s", "tag:2", cfg.Tags[1])
 	}
 }
+
+func TestConfig_WithAPIKey(t *testing.T) {
+	cfg := NewConfig().WithAPIKey("test key")
+
+	if cfg.APIKey != "test key" {
+		t.Fatalf("expected api key to be %s, have %s", "test key", cfg.APIKey)
+	}
+}

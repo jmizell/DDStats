@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -133,6 +134,39 @@ func TestDDClient_SendEvent(t *testing.T) {
 
 		if len(httpClient.callBody) == 0 {
 			tt.Fatalf("expected request body to be present")
+		}
+	})
+}
+
+func TestDDClient_post(t *testing.T) {
+
+	t.Run("nil payload", func(t *testing.T) {
+		client := NewDDClient("testKey")
+		httpClient := newTestHTTPClient(0, "", nil)
+		client.SetHTTPClient(httpClient)
+
+		if err := client.post(make(chan int), "", ""); err == nil {
+			t.Fatalf("expected an error, have nil")
+		} else if !strings.HasPrefix(err.Error(), "could not marshal data to json") {
+			t.Fatalf("expected error to have prefix \"%s\", have \"%s\"", "could not marshal data to json", err.Error())
+		}
+	})
+
+	t.Run("bad api response empty body", func(t *testing.T) {
+		client := NewDDClient("testKey")
+		httpClient := &testHTTPClient{
+			error: nil,
+			response: &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       ioutil.NopCloser(bytes.NewReader([]byte(""))),
+			},
+		}
+		client.SetHTTPClient(httpClient)
+
+		if err := client.post(nil, "", ""); err == nil {
+			t.Fatalf("expected an error, have nil")
+		} else if !strings.HasPrefix(err.Error(), "could not read api response") {
+			t.Fatalf("expected error to have prefix \"%s\", have \"%s\"", "could not read api response", err.Error())
 		}
 	})
 }
