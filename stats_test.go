@@ -127,7 +127,7 @@ const (
 
 var testTags = []string{"tag:1"}
 
-func NewTestStats() (*Stats, *TestAPIClient) {
+func NewTestStats() (*Stats, *TestAPIClient, error) {
 
 	testClient := NewTestAPIClient()
 
@@ -141,20 +141,40 @@ func NewTestStats() (*Stats, *TestAPIClient) {
 	cfg.MetricBuffer = 10 * 2
 	cfg.FlushIntervalSeconds = 60
 
-	return NewStats(cfg), testClient
+	stat, err := NewStats(cfg)
+
+	return stat, testClient, err
 }
 
-func NewTestStatsWithStart() (*Stats, *TestAPIClient) {
-	stats, testApi := NewTestStats()
+func NewTestStatsWithStart() (*Stats, *TestAPIClient, error) {
+	stats, testApi, err := NewTestStats()
+	if err != nil {
+		return nil, nil, err
+	}
 	go stats.start()
 	stats.blockReady()
-	return stats, testApi
+	return stats, testApi, err
+}
+
+func TestNewStats(t *testing.T) {
+	t.Run("no client", func(tt *testing.T) {
+		stat, err := NewStats(NewConfig())
+		if err == nil {
+			tt.Fatalf("expected error with no client")
+		}
+		if stat != nil {
+			tt.Fatalf("expected stat to be nil")
+		}
+	})
 }
 
 func TestStats_SendSeries(t *testing.T) {
 
 	t.Run("one metric", func(tt *testing.T) {
-		stats, testApi := NewTestStats()
+		stats, testApi, err := NewTestStats()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 
 		metrics := []*client.DDMetric{
 			{
@@ -203,7 +223,10 @@ func TestStats_CountGauge(t *testing.T) {
 	}
 
 	t.Run("one increment", func(tt *testing.T) {
-		stats, testApi := NewTestStatsWithStart()
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		stats.Increment("test", nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
@@ -218,7 +241,10 @@ func TestStats_CountGauge(t *testing.T) {
 	})
 
 	t.Run("two increment", func(tt *testing.T) {
-		stats, testApi := NewTestStatsWithStart()
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		stats.Increment("test", nil)
 		stats.Increment("test", nil)
 		time.Sleep(time.Millisecond * 100)
@@ -234,7 +260,10 @@ func TestStats_CountGauge(t *testing.T) {
 	})
 
 	t.Run("one decrement", func(tt *testing.T) {
-		stats, testApi := NewTestStatsWithStart()
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		stats.Decrement("test", nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
@@ -249,7 +278,10 @@ func TestStats_CountGauge(t *testing.T) {
 	})
 
 	t.Run("two decrement", func(tt *testing.T) {
-		stats, testApi := NewTestStatsWithStart()
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		stats.Decrement("test", nil)
 		stats.Decrement("test", nil)
 		time.Sleep(time.Millisecond * 100)
@@ -265,7 +297,10 @@ func TestStats_CountGauge(t *testing.T) {
 	})
 
 	t.Run("three increment one decrement", func(tt *testing.T) {
-		stats, testApi := NewTestStatsWithStart()
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		stats.Increment("test", nil)
 		stats.Increment("test", nil)
 		stats.Increment("test", nil)
@@ -283,7 +318,10 @@ func TestStats_CountGauge(t *testing.T) {
 	})
 
 	t.Run("count value 10", func(tt *testing.T) {
-		stats, testApi := NewTestStatsWithStart()
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		stats.Count("test", 10, nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
@@ -298,7 +336,10 @@ func TestStats_CountGauge(t *testing.T) {
 	})
 
 	t.Run("one gauge", func(tt *testing.T) {
-		stats, testApi := NewTestStatsWithStart()
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		stats.Gauge("test", 10, nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
@@ -315,7 +356,10 @@ func TestStats_CountGauge(t *testing.T) {
 	})
 
 	t.Run("one gauge and one increment", func(tt *testing.T) {
-		stats, testApi := NewTestStatsWithStart()
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		stats.Gauge("test2", 10, nil)
 		stats.Increment("test", nil)
 		time.Sleep(time.Millisecond * 100)
@@ -352,7 +396,10 @@ func TestStats_Event(t *testing.T) {
 	}
 
 	t.Run("no error", func(tt *testing.T) {
-		stats, testApi := NewTestStats()
+		stats, testApi, err := NewTestStats()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		sendEvent := testEvent
 		if err := stats.Event(&sendEvent); err != nil {
 			tt.Fatalf("expected no error on send, have %s", err.Error())
@@ -376,7 +423,10 @@ func TestStats_Event(t *testing.T) {
 	})
 
 	t.Run("error", func(tt *testing.T) {
-		stats, testApi := NewTestStats()
+		stats, testApi, err := NewTestStats()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		testApi.sendEventError = fmt.Errorf("test error")
 		sendEvent := testEvent
 		if err := stats.Event(&sendEvent); err == nil {
@@ -403,7 +453,10 @@ func TestStats_Event(t *testing.T) {
 
 func TestStats_ServiceCheck(t *testing.T) {
 	t.Run("no error", func(tt *testing.T) {
-		stats, testApi := NewTestStats()
+		stats, testApi, err := NewTestStats()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		if err := stats.ServiceCheck("check1", "failed", client.Warning, nil); err != nil {
 			tt.Fatalf("expected no error on service check, have %s", err.Error())
 		}
@@ -437,7 +490,10 @@ func TestStats_ServiceCheck(t *testing.T) {
 func TestStats_Errors(t *testing.T) {
 
 	t.Run("no error", func(tt *testing.T) {
-		stats, _ := NewTestStatsWithStart()
+		stats, _, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 
 		stats.flushWG.Add(1)
 		stats.send(
@@ -457,7 +513,10 @@ func TestStats_Errors(t *testing.T) {
 	})
 
 	t.Run("error", func(tt *testing.T) {
-		stats, testApi := NewTestStatsWithStart()
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		testApi.sendSeriesError = fmt.Errorf("failed sent")
 
 		stats.flushWG.Add(1)
@@ -486,7 +545,10 @@ func TestStats_Errors(t *testing.T) {
 func TestStats_ErrorCallback(t *testing.T) {
 
 	t.Run("no error", func(tt *testing.T) {
-		stats, _ := NewTestStatsWithStart()
+		stats, _, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 
 		var callbackError error
 		stats.ErrorCallback(func(err error, metricSeries []*client.DDMetric) {
@@ -510,7 +572,10 @@ func TestStats_ErrorCallback(t *testing.T) {
 	})
 
 	t.Run("error", func(tt *testing.T) {
-		stats, testApi := NewTestStatsWithStart()
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
 		testApi.sendSeriesError = fmt.Errorf("failed sent")
 
 		var callbackError error

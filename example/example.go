@@ -16,7 +16,10 @@ func main() {
 		WithTags([]string{"custom_tag:true"})
 
 	// Initialize the client with your namespace, host, api key, and your global tags
-	stats := ddstats.NewStats(cfg)
+	stats, err := ddstats.NewStats(cfg)
+	if err != nil {
+		log.Fatalf(err.Error())
+	}
 
 	// We can add a new metric by calling any of the methods, Increment,
 	// Decrement, Count or Gauge. Increment increases a count metric by one.

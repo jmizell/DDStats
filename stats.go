@@ -42,7 +42,7 @@ type Stats struct {
 	dropped       uint64
 }
 
-func NewStats(cfg *Config) *Stats {
+func NewStats(cfg *Config) (*Stats, error) {
 
 	s := &Stats{
 		namespace:     cfg.Namespace,
@@ -60,11 +60,13 @@ func NewStats(cfg *Config) *Stats {
 		s.client = cfg.client
 	} else if cfg.APIKey != "" {
 		s.client = client.NewDDClient(cfg.APIKey)
+	} else {
+		return nil, fmt.Errorf("no client configured")
 	}
 
 	go s.start()
 	s.blockReady()
-	return s
+	return s, nil
 }
 
 func (c *Stats) start() {
