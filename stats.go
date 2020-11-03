@@ -34,7 +34,7 @@ type Stats struct {
 	workerWG      *sync.WaitGroup
 	flushWG       *sync.WaitGroup
 	ready         chan bool
-	flushCallback func(metrics map[string]*metric)
+	flushCallback func(metricSeries []*client.DDMetric)
 	errorCallback func(err error, metricSeries []*client.DDMetric)
 	errors        []error
 	maxErrors     int
@@ -231,7 +231,7 @@ func (c *Stats) send(metrics map[string]*metric, flushTime time.Duration) {
 	}
 
 	if c.flushCallback != nil {
-		c.flushCallback(metrics)
+		c.flushCallback(metricsSeries)
 	}
 }
 
@@ -333,7 +333,7 @@ func (c *Stats) Flush() {
 }
 
 // FlushCallback registers a call back function that will be called at the end of every successful flush.
-func (c *Stats) FlushCallback(f func(metrics map[string]*metric)) {
+func (c *Stats) FlushCallback(f func(metricSeries []*client.DDMetric)) {
 	c.flushCallback = f
 }
 

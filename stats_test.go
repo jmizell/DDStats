@@ -542,6 +542,35 @@ func TestStats_Errors(t *testing.T) {
 
 }
 
+func TestStats_FlushCallback(t *testing.T) {
+	t.Run("flush one stat", func(tt *testing.T) {
+		stats, _, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+
+		var callbackStats = make([]*client.DDMetric, 0)
+		stats.FlushCallback(func(metricSeries []*client.DDMetric) {
+			callbackStats = metricSeries
+		})
+
+		stats.flushWG.Add(1)
+		stats.send(
+			map[string]*metric{
+				"test": {
+					name:  "test",
+					class: client.Gauge,
+					value: 10,
+				},
+			}, time.Second*10,
+		)
+
+		if len(callbackStats) != 1 {
+			tt.Fatalf("expected there to be stats %d stat in flush call, there was %d", 1, len(callbackStats))
+		}
+	})
+}
+
 func TestStats_ErrorCallback(t *testing.T) {
 
 	t.Run("no error", func(tt *testing.T) {
