@@ -269,6 +269,9 @@ func (c *Stats) Event(event *client.DDEvent) error {
 	if event.Host == "" {
 		event.Host = c.host
 	}
+	if event.DateHappened == 0 {
+		event.DateHappened = time.Now().Unix()
+	}
 	event.AggregationKey = prependNamespace(c.namespace, event.AggregationKey)
 	event.Tags = combineTags(c.tags, event.Tags)
 	return c.client.SendEvent(event)

@@ -89,14 +89,14 @@ func TestDDClient_SendEvent(t *testing.T) {
 		}
 	})
 
-	t.Run("api error", func(tt *testing.T) {
+	t.Run("api error forbidden", func(tt *testing.T) {
 		client := NewDDClient("testKey")
 		httpClient := newTestHTTPClient(http.StatusForbidden, "forbidden", nil)
 		client.SetHTTPClient(httpClient)
 
 		if err := client.SendEvent(&testEvent); err == nil {
 			tt.Fatalf("expected an error, have nil")
-		} else if err.Error() != "forbidden" {
+		} else if err.Error() != "api response 403: forbidden" {
 			tt.Fatalf("expected error to be %s, have %s", "forbidden", err.Error())
 		}
 
@@ -113,7 +113,7 @@ func TestDDClient_SendEvent(t *testing.T) {
 		}
 	})
 
-	t.Run("api error", func(tt *testing.T) {
+	t.Run("client error", func(tt *testing.T) {
 		client := NewDDClient("testKey")
 		httpClient := newTestHTTPClient(0, "", fmt.Errorf("client error"))
 		client.SetHTTPClient(httpClient)

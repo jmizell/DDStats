@@ -85,8 +85,8 @@ func (c *DDClient) post(payload interface{}, encoding, url string) error {
 		return fmt.Errorf("could not read api response, %s", err.Error())
 	}
 
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf(strings.Join(apiResponse.Errors, ", "))
+	if response.StatusCode > 299 {
+		return fmt.Errorf("api response %d: %s", response.StatusCode, strings.Join(apiResponse.Errors, ", "))
 	}
 
 	return nil
