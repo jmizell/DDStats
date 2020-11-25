@@ -18,30 +18,32 @@ type job struct {
 }
 
 type Stats struct {
-	namespace       string
-	host            string
-	tags            []string
-	flushInterval   time.Duration
-	workerCount     int
-	workerBuffer    int
-	metricBuffer    int
-	client          client.APIClient
-	metrics         []map[string]*metric
-	metricsQueue    []*client.DDMetric
-	metricQueueLock *sync.Mutex
-	metricUpdates   chan *metric
-	workers         []chan *job
-	shutdown        chan bool
-	flush           chan bool
-	workerWG        *sync.WaitGroup
-	flushWG         *sync.WaitGroup
-	ready           chan bool
-	flushCallback   func(metricSeries []*client.DDMetric)
-	errorCallback   func(err error, metricSeries []*client.DDMetric)
-	errors          []error
-	maxErrors       int
-	errorLock       *sync.RWMutex
-	dropped         uint64
+	namespace        string
+	host             string
+	tags             []string
+	flushInterval    time.Duration
+	workerCount      int
+	workerBuffer     int
+	metricBuffer     int
+	client           client.APIClient
+	metrics          []map[string]*metric
+	metricsQueue     []*client.DDMetric
+	metricQueueLock  *sync.Mutex
+	metricUpdates    chan *metric
+	workers          []chan *job
+	shutdown         chan bool
+	shutdownComplete chan bool
+	flush            chan bool
+	workerWG         *sync.WaitGroup
+	flushWG          *sync.WaitGroup
+	ready            chan bool
+	flushCallback    func(metricSeries []*client.DDMetric)
+	errorCallback    func(err error, metricSeries []*client.DDMetric)
+	errors           []error
+	maxErrors        int
+	errorLock        *sync.RWMutex
+	dropped          uint64
+	lastFlush        time.Time
 }
 
 func NewStats(cfg *Config) (*Stats, error) {
@@ -75,6 +77,7 @@ func (c *Stats) start() {
 
 	// Setup our channels
 	c.shutdown = make(chan bool)
+	c.shutdownComplete = make(chan bool)
 	c.metricUpdates = make(chan *metric, c.metricBuffer)
 
 	// Setup wait group for workers. Flush wait group is separate as
@@ -108,17 +111,20 @@ func (c *Stats) start() {
 
 	// Start the flush worker. This will send a flush signal until given
 	// a shutdown signal.
-	cancelFlush := make(chan bool)
+	shutdownFlushSignalWorker := make(chan bool)
+	flushSignalWorkerWG := &sync.WaitGroup{}
 	c.flush = make(chan bool)
 	go func() {
 		flush := time.NewTicker(c.flushInterval)
 		for {
 			select {
 			case <-flush.C:
+				// Add a job to the flush wait group
+				c.flushWG.Add(1)
 				c.flush <- true
-			case <-cancelFlush:
+			case <-shutdownFlushSignalWorker:
 				flush.Stop()
-				c.workerWG.Done()
+				flushSignalWorkerWG.Done()
 				return
 			}
 		}
@@ -128,7 +134,7 @@ func (c *Stats) start() {
 	// We need to track time between flushes. If a flush is called before the scheduled
 	// interval, we will need to know exactly how much time has passed, so we can calculate
 	// our rate metrics.
-	lastFlush := time.Now()
+	c.lastFlush = time.Now()
 	for {
 		select {
 		case metric := <-c.metricUpdates:
@@ -138,34 +144,13 @@ func (c *Stats) start() {
 			c.workerWG.Add(1)
 			c.workers[fnv1a(metric.name)%uint32(len(c.workers))] <- &job{metric: metric}
 		case <-c.flush:
-
-			// TODO make non-blocking
-
-			// On a flush signal we need to wait for all current metrics to be processed
-			// by the workers
-			c.workerWG.Wait()
-
-			// We need to make a copy of all the metrics to a new data structure
-			flattenedMetrics := make(map[string]*metric)
-			for _, m := range c.metrics {
-				for k, v := range m {
-					flattenedMetrics[k] = v
-				}
-			}
-
-			// Then we zero out all of the metrics, and start with new values for the
-			// next flush interval.
-			for i := range c.metrics {
-				c.metrics[i] = map[string]*metric{}
-			}
-
-			// Update the flush interval, add a job to the flush wait group, and send
-			// the metrics to the flush worker.
-			interval := time.Since(lastFlush)
-			c.flushWG.Add(1)
-			go c.send(flattenedMetrics, interval)
-			lastFlush = time.Now()
+			// Copy out the metrics for this interval, and send them
+			c.commitFlush()
 		case <-c.shutdown:
+
+			// Perform a final flush of all stats. Anything buffered in the updates channel
+			// will be dropped.
+			c.commitFlush()
 
 			// On shutdown, we'll signal all the workers to exit after completing the current job
 			for i := range c.workers {
@@ -173,15 +158,45 @@ func (c *Stats) start() {
 				c.workers[i] <- &job{shutdown: true}
 			}
 
-			// Signal to the flush worker to shutdown
-			c.workerWG.Add(1)
-			cancelFlush <- true
+			// Signal to the flush worker to shutdown, wait before returning
+			flushSignalWorkerWG.Add(1)
+			shutdownFlushSignalWorker <- true
+			flushSignalWorkerWG.Wait()
 
-			// Finally wait for the workers to shutdown before returning
+			// Wait for all workers, and flush to complete
 			c.workerWG.Wait()
+			c.flushWG.Wait()
+
+			// Signal shutdown complete
+			close(c.shutdownComplete)
 			return
 		}
 	}
+}
+func (c *Stats) commitFlush() {
+
+	// On a flush signal we need to wait for all current metrics to be processed
+	// by the workers
+	c.workerWG.Wait()
+
+	// We need to make a copy of all the metrics to a new data structure
+	flattenedMetrics := make(map[string]*metric)
+	for _, m := range c.metrics {
+		for k, v := range m {
+			flattenedMetrics[k] = v
+		}
+	}
+
+	// Then we zero out all of the metrics, and start with new values for the
+	// next flush interval.
+	for i := range c.metrics {
+		c.metrics[i] = map[string]*metric{}
+	}
+
+	// Update the flush interval, and send the metrics to the flush worker.
+	interval := time.Since(c.lastFlush)
+	go c.send(flattenedMetrics, interval)
+	c.lastFlush = time.Now()
 }
 
 func (c *Stats) blockReady() {
@@ -397,9 +412,13 @@ func (c *Stats) GetDroppedMetricCount() uint64 {
 }
 
 // Flush signals the main worker thread to copy all current metrics, and send them
-// to the Datadog api.
+// to the Datadog api. Flush blocks until all flush jobs complete.
+// been sent, use FlushWait.
 func (c *Stats) Flush() {
+	// Add a job to the flush wait group
+	c.flushWG.Add(1)
 	c.flush <- true
+	c.flushWG.Wait()
 }
 
 // FlushCallback registers a call back function that will be called at the end of every successful flush.
@@ -421,13 +440,20 @@ func (c *Stats) Errors() []error {
 	return errs
 }
 
-// Close signals a shutdown, and blocks while waiting for a final flush, and all workers to shutdown.
+// Close signals a shutdown, and blocks while waiting for flush to complete, and all workers to shutdown.
 func (c *Stats) Close() {
-	c.Flush()
-	// TODO this will block indefinitely if called twice
-	c.shutdown <- true
-	c.workerWG.Wait()
-	c.flushWG.Wait()
+
+	// Test if shutdown is open
+	select {
+	case <-c.shutdown:
+	default:
+		// Close shutdown channel
+		c.flushWG.Add(1)
+		close(c.shutdown)
+	}
+
+	// block until shutdown is complete
+	<-c.shutdownComplete
 }
 
 func prependNamespace(namespace, name string) string {

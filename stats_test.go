@@ -343,6 +343,89 @@ func TestStats_QueueSeries(t *testing.T) {
 	})
 }
 
+func TestStats_Close(t *testing.T) {
+
+	baseMetric := client.DDMetric{
+		Host:     testHost,
+		Metric:   "testNamespace.test",
+		Tags:     []string{"tag:1"},
+		Interval: 1,
+		Points:   [][2]interface{}{{1, float64(1)}},
+		Type:     client.Rate,
+	}
+	seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&baseMetric}}}
+
+	t.Run("one call to close", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		stats.IncrementRate("test", nil)
+		time.Sleep(time.Millisecond * 100)
+		stats.Close()
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+
+	t.Run("two calls to close", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		stats.IncrementRate("test", nil)
+		time.Sleep(time.Millisecond * 100)
+		stats.Close()
+		stats.Close()
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+
+	t.Run("many calls close", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		stats.IncrementRate("test", nil)
+		time.Sleep(time.Millisecond * 100)
+		for i := 0; i < 50; i++ {
+			go stats.Close()
+		}
+		time.Sleep(time.Second * 1)
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+}
+
+func TestStats_Flush(t *testing.T) {
+	baseMetric := client.DDMetric{
+		Host:     testHost,
+		Metric:   "testNamespace.test",
+		Tags:     []string{"tag:1"},
+		Interval: 1,
+		Points:   [][2]interface{}{{1, float64(1)}},
+		Type:     client.Rate,
+	}
+	seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&baseMetric}}}
+
+	stats, testApi, err := NewTestStatsWithStart()
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	stats.IncrementRate("test", nil)
+	time.Sleep(time.Millisecond * 100)
+	stats.Flush()
+
+	if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+		t.Fatalf(err.Error())
+	}
+}
+
 func TestStats_CountGaugeRate(t *testing.T) {
 
 	baseMetric := client.DDMetric{
