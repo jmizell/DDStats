@@ -31,8 +31,12 @@ type Stats struct {
 	metricQueueLock  *sync.Mutex
 	metricUpdates    chan *metric
 	workers          []chan *job
-	shutdown         chan bool
-	shutdownComplete chan bool
+
+
+	shutdownSignal         chan bool
+	shutdown bool
+	shutdownLock     *sync.Mutex
+
 	flush            chan bool
 	workerWG         *sync.WaitGroup
 	flushWG          *sync.WaitGroup
@@ -76,8 +80,9 @@ func NewStats(cfg *Config) (*Stats, error) {
 func (c *Stats) start() {
 
 	// Setup our channels
-	c.shutdown = make(chan bool)
-	c.shutdownComplete = make(chan bool)
+	c.shutdownSignal = make(chan bool)
+	c.shutdownLock = &sync.Mutex{}
+	c.shutdown = false
 	c.metricUpdates = make(chan *metric, c.metricBuffer)
 
 	// Setup wait group for workers. Flush wait group is separate as
@@ -146,7 +151,7 @@ func (c *Stats) start() {
 		case <-c.flush:
 			// Copy out the metrics for this interval, and send them
 			c.commitFlush()
-		case <-c.shutdown:
+		case <-c.shutdownSignal:
 
 			// Perform a final flush of all stats. Anything buffered in the updates channel
 			// will be dropped.
@@ -167,12 +172,11 @@ func (c *Stats) start() {
 			c.workerWG.Wait()
 			c.flushWG.Wait()
 
-			// Signal shutdown complete
-			close(c.shutdownComplete)
 			return
 		}
 	}
 }
+
 func (c *Stats) commitFlush() {
 
 	// On a flush signal we need to wait for all current metrics to be processed
@@ -443,17 +447,17 @@ func (c *Stats) Errors() []error {
 // Close signals a shutdown, and blocks while waiting for flush to complete, and all workers to shutdown.
 func (c *Stats) Close() {
 
-	// Test if shutdown is open
-	select {
-	case <-c.shutdown:
-	default:
-		// Close shutdown channel
-		c.flushWG.Add(1)
-		close(c.shutdown)
+	c.shutdownLock.Lock()
+	defer c.shutdownLock.Unlock()
+	if c.shutdown {
+		return
 	}
 
-	// block until shutdown is complete
-	<-c.shutdownComplete
+	c.shutdown = true
+	c.flushWG.Add(1)
+	close(c.shutdownSignal)
+	c.workerWG.Wait()
+	c.flushWG.Wait()
 }
 
 func prependNamespace(namespace, name string) string {
