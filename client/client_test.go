@@ -138,6 +138,83 @@ func TestDDClient_SendEvent(t *testing.T) {
 	})
 }
 
+func TestDDClient_SendSeries(t *testing.T) {
+
+	testSeries := DDMetricSeries{
+		Series: []*DDMetric{
+			{
+				Host:     "host1",
+				Interval: 60,
+				Metric:   "test.metric",
+				Points: [][2]interface{}{{time.Now().Unix(), 1}},
+				Tags:     []string{"tag:1"},
+				Type:     Count,
+			},
+		},
+	}
+
+	callURL := "https://api.datadoghq.com/api/v1/series?api_key=testKey"
+
+	t.Run("no error", func(tt *testing.T) {
+		client := NewDDClient("testKey")
+		httpClient := newTestHTTPClient(http.StatusOK, "", nil)
+		client.SetHTTPClient(httpClient)
+
+		if err := client.SendSeries(&testSeries); err != nil {
+			tt.Fatalf("expected no error, have %s", err.Error())
+		}
+
+		if httpClient.callURL != callURL {
+			tt.Fatalf("expected request url to be %s, have %s", callURL, httpClient.callURL)
+		}
+
+		if httpClient.callContentType != encodingJSON {
+			tt.Fatalf("expected request contentType to be %s, have %s", encodingJSON, httpClient.callContentType)
+		}
+
+		if len(httpClient.callBody) == 0 {
+			tt.Fatalf("expected request body to be present")
+		}
+	})
+}
+
+
+func TestDDClient_SendServiceCheck(t *testing.T) {
+
+	testCheck := DDServiceCheck{
+		Check:     "test",
+		Hostname:  "testHost",
+		Message:   "check ran",
+		Status:    1,
+		Tags:     []string{"tag:1"},
+		Timestamp: time.Now().Unix(),
+	}
+
+	callURL := "https://api.datadoghq.com/api/v1/check_run?api_key=testKey"
+
+	t.Run("no error", func(tt *testing.T) {
+		client := NewDDClient("testKey")
+		httpClient := newTestHTTPClient(http.StatusOK, "", nil)
+		client.SetHTTPClient(httpClient)
+
+		if err := client.SendServiceCheck(&testCheck); err != nil {
+			tt.Fatalf("expected no error, have %s", err.Error())
+		}
+
+		if httpClient.callURL != callURL {
+			tt.Fatalf("expected request url to be %s, have %s", callURL, httpClient.callURL)
+		}
+
+		if httpClient.callContentType != encodingJSON {
+			tt.Fatalf("expected request contentType to be %s, have %s", encodingJSON, httpClient.callContentType)
+		}
+
+		if len(httpClient.callBody) == 0 {
+			tt.Fatalf("expected request body to be present")
+		}
+	})
+}
+
 func TestDDClient_post(t *testing.T) {
 
 	t.Run("nil payload", func(t *testing.T) {

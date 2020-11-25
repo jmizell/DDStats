@@ -3,6 +3,7 @@ package client
 // DDMetric Type values
 const (
 	Count = "count"
+	Rate  = "rate"
 	Gauge = "gauge"
 )
 

@@ -42,7 +42,7 @@ func TestMetricUpdate(t *testing.T) {
 		}
 	})
 
-	t.Run("count update", func(tt *testing.T) {
+	t.Run("gauge update", func(tt *testing.T) {
 		m := &metric{class: client.Gauge}
 		m.update(10)
 		if m.value != 10.0 {
@@ -50,7 +50,7 @@ func TestMetricUpdate(t *testing.T) {
 		}
 	})
 
-	t.Run("count update multiple", func(tt *testing.T) {
+	t.Run("gauge update multiple", func(tt *testing.T) {
 		m := &metric{class: client.Gauge}
 		m.update(10)
 		m.update(-5)
@@ -61,6 +61,34 @@ func TestMetricUpdate(t *testing.T) {
 }
 
 func TestMetricGetMetric(t *testing.T) {
+
+	t.Run("rate 1 sec interval", func(tt *testing.T) {
+		m := &metric{class: client.Rate, value: 10}
+		ddm := m.getMetric("", "", nil, time.Second*1)
+		if len(ddm.Points) != 1 {
+			tt.Fatalf("expected to have %d points, have %d", 1, len(ddm.Points))
+		}
+		if ddm.Points[0][1] != 10.0 {
+			tt.Fatalf("expected data point to be %f, have %f", 10.0, ddm.Points[0][1])
+		}
+		if ddm.Interval != int64((time.Second * 1).Seconds()) {
+			tt.Fatalf("expected interval to be %d, have %d", int64((time.Second * 1).Seconds()), ddm.Interval)
+		}
+	})
+
+	t.Run("rate 5 sec interval", func(tt *testing.T) {
+		m := &metric{class: client.Rate, value: 10}
+		ddm := m.getMetric("", "", nil, time.Second*5)
+		if len(ddm.Points) != 1 {
+			tt.Fatalf("expected to have %d points, have %d", 1, len(ddm.Points))
+		}
+		if ddm.Points[0][1] != 2.0 {
+			tt.Fatalf("expected data point to be %f, have %f", 2.0, ddm.Points[0][1])
+		}
+		if ddm.Interval != int64((time.Second * 5).Seconds()) {
+			tt.Fatalf("expected interval to be %d, have %d", int64((time.Second * 5).Seconds()), ddm.Interval)
+		}
+	})
 
 	t.Run("count 1 sec interval", func(tt *testing.T) {
 		m := &metric{class: client.Count, value: 10}
@@ -82,8 +110,8 @@ func TestMetricGetMetric(t *testing.T) {
 		if len(ddm.Points) != 1 {
 			tt.Fatalf("expected to have %d points, have %d", 1, len(ddm.Points))
 		}
-		if ddm.Points[0][1] != 2.0 {
-			tt.Fatalf("expected data point to be %f, have %f", 2.0, ddm.Points[0][1])
+		if ddm.Points[0][1] != 10.0 {
+			tt.Fatalf("expected data point to be %f, have %f", 10.0, ddm.Points[0][1])
 		}
 		if ddm.Interval != int64((time.Second * 5).Seconds()) {
 			tt.Fatalf("expected interval to be %d, have %d", int64((time.Second * 5).Seconds()), ddm.Interval)

@@ -49,7 +49,7 @@ func (t *TestAPIClient) SendEvent(event *client.DDEvent) error {
 	return t.sendEventError
 }
 
-func (t *TestAPIClient) SetHTTPClient(client client.HTTPClient) {}
+func (t *TestAPIClient) SetHTTPClient(client.HTTPClient) {}
 
 func (t *TestAPIClient) FindMetric(callIndex int, ddMetric *client.DDMetric) error {
 
@@ -166,6 +166,15 @@ func TestNewStats(t *testing.T) {
 			tt.Fatalf("expected stat to be nil")
 		}
 	})
+	t.Run("with api key", func(tt *testing.T) {
+		stat, err := NewStats(NewConfig().WithAPIKey("key"))
+		if err != nil {
+			tt.Fatalf("expected no error have %s", err.Error())
+		}
+		if stat == nil {
+			tt.Fatalf("expected stat to be not nil")
+		}
+	})
 }
 
 func TestStats_SendSeries(t *testing.T) {
@@ -210,24 +219,146 @@ func TestStats_SendSeries(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 	})
+
+	t.Run("one metric no host", func(tt *testing.T) {
+		stats, testApi, err := NewTestStats()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+
+		metrics := []*client.DDMetric{
+			{
+				Interval: 10,
+				Metric:   "metric1",
+				Points:   [][2]interface{}{{1, 2}},
+				Tags:     []string{"tag:2"},
+				Type:     client.Count,
+			},
+		}
+
+		if err := stats.SendSeries(metrics); err != nil {
+			tt.Fatalf("send returned err, %s", err.Error())
+		}
+
+		seriesCalls := []*client.DDMetricSeries{
+			{
+				Series: []*client.DDMetric{
+					{
+						Host:     testHost,
+						Metric:   "testNamespace.metric1",
+						Tags:     []string{"tag:2", "tag:1"},
+						Interval: 10,
+						Type:     client.Count,
+						Points:   [][2]interface{}{{1, 2}},
+					},
+				},
+			},
+		}
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
 }
 
-func TestStats_CountGauge(t *testing.T) {
+func TestStats_QueueSeries(t *testing.T) {
+
+	t.Run("one metric", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+
+		metrics := []*client.DDMetric{
+			{
+				Host:     "testHost2",
+				Interval: 10,
+				Metric:   "metric1",
+				Points:   [][2]interface{}{{1, 2}},
+				Tags:     []string{"tag:2"},
+				Type:     client.Count,
+			},
+		}
+
+		stats.QueueSeries(metrics)
+		stats.Close()
+
+		seriesCalls := []*client.DDMetricSeries{
+			{
+				Series: []*client.DDMetric{
+					{
+						Host:     "testHost2",
+						Metric:   "testNamespace.metric1",
+						Tags:     []string{"tag:2", "tag:1"},
+						Interval: 10,
+						Type:     client.Count,
+						Points:   [][2]interface{}{{1, 2}},
+					},
+				},
+			},
+		}
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+
+	t.Run("one metric no host", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+
+		metrics := []*client.DDMetric{
+			{
+				Interval: 10,
+				Metric:   "metric1",
+				Points:   [][2]interface{}{{1, 2}},
+				Tags:     []string{"tag:2"},
+				Type:     client.Count,
+			},
+		}
+
+		stats.QueueSeries(metrics)
+		stats.Close()
+
+		seriesCalls := []*client.DDMetricSeries{
+			{
+				Series: []*client.DDMetric{
+					{
+						Host:     testHost,
+						Metric:   "testNamespace.metric1",
+						Tags:     []string{"tag:2", "tag:1"},
+						Interval: 10,
+						Type:     client.Count,
+						Points:   [][2]interface{}{{1, 2}},
+					},
+				},
+			},
+		}
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+}
+
+func TestStats_CountGaugeRate(t *testing.T) {
 
 	baseMetric := client.DDMetric{
 		Host:     testHost,
 		Metric:   "testNamespace.test",
 		Tags:     []string{"tag:1"},
 		Interval: 1,
-		Type:     client.Count,
+		Type:     client.Rate,
 	}
 
-	t.Run("one increment", func(tt *testing.T) {
+	t.Run("one increment rate", func(tt *testing.T) {
 		stats, testApi, err := NewTestStatsWithStart()
 		if err != nil {
 			tt.Fatalf(err.Error())
 		}
-		stats.Increment("test", nil)
+		stats.IncrementRate("test", nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
@@ -240,13 +371,13 @@ func TestStats_CountGauge(t *testing.T) {
 		}
 	})
 
-	t.Run("two increment", func(tt *testing.T) {
+	t.Run("two increment rate", func(tt *testing.T) {
 		stats, testApi, err := NewTestStatsWithStart()
 		if err != nil {
 			tt.Fatalf(err.Error())
 		}
-		stats.Increment("test", nil)
-		stats.Increment("test", nil)
+		stats.IncrementRate("test", nil)
+		stats.IncrementRate("test", nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
@@ -259,12 +390,12 @@ func TestStats_CountGauge(t *testing.T) {
 		}
 	})
 
-	t.Run("one decrement", func(tt *testing.T) {
+	t.Run("one decrement rate", func(tt *testing.T) {
 		stats, testApi, err := NewTestStatsWithStart()
 		if err != nil {
 			tt.Fatalf(err.Error())
 		}
-		stats.Decrement("test", nil)
+		stats.DecrementRate("test", nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
@@ -277,13 +408,13 @@ func TestStats_CountGauge(t *testing.T) {
 		}
 	})
 
-	t.Run("two decrement", func(tt *testing.T) {
+	t.Run("two decrement rate", func(tt *testing.T) {
 		stats, testApi, err := NewTestStatsWithStart()
 		if err != nil {
 			tt.Fatalf(err.Error())
 		}
-		stats.Decrement("test", nil)
-		stats.Decrement("test", nil)
+		stats.DecrementRate("test", nil)
+		stats.DecrementRate("test", nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
@@ -296,7 +427,124 @@ func TestStats_CountGauge(t *testing.T) {
 		}
 	})
 
-	t.Run("three increment one decrement", func(tt *testing.T) {
+	t.Run("three increment rate one decrement rate", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		stats.IncrementRate("test", nil)
+		stats.IncrementRate("test", nil)
+		stats.IncrementRate("test", nil)
+		stats.DecrementRate("test", nil)
+		time.Sleep(time.Millisecond * 100)
+		stats.Close()
+
+		m1 := baseMetric
+		m1.Points = [][2]interface{}{{1, float64(2)}}
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+
+	t.Run("rate value 10", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		stats.Rate("test", 10, nil)
+		time.Sleep(time.Millisecond * 100)
+		stats.Close()
+
+		m1 := baseMetric
+		m1.Points = [][2]interface{}{{1, float64(10)}}
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+
+	t.Run("one increment count", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		stats.Increment("test", nil)
+		time.Sleep(time.Millisecond * 100)
+		stats.Close()
+
+		m1 := baseMetric
+		m1.Points = [][2]interface{}{{1, float64(1)}}
+		m1.Type = client.Count
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+
+	t.Run("two increment count", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		stats.Increment("test", nil)
+		stats.Increment("test", nil)
+		time.Sleep(time.Millisecond * 100)
+		stats.Close()
+
+		m1 := baseMetric
+		m1.Points = [][2]interface{}{{1, float64(2)}}
+		m1.Type = client.Count
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+
+	t.Run("one decrement count", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		stats.Decrement("test", nil)
+		time.Sleep(time.Millisecond * 100)
+		stats.Close()
+
+		m1 := baseMetric
+		m1.Points = [][2]interface{}{{1, float64(-1)}}
+		m1.Type = client.Count
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+
+	t.Run("two decrement count", func(tt *testing.T) {
+		stats, testApi, err := NewTestStatsWithStart()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		stats.Decrement("test", nil)
+		stats.Decrement("test", nil)
+		time.Sleep(time.Millisecond * 100)
+		stats.Close()
+
+		m1 := baseMetric
+		m1.Points = [][2]interface{}{{1, float64(-2)}}
+		m1.Type = client.Count
+		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
+
+		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+			tt.Fatalf(err.Error())
+		}
+	})
+
+	t.Run("three increment count one decrement count", func(tt *testing.T) {
 		stats, testApi, err := NewTestStatsWithStart()
 		if err != nil {
 			tt.Fatalf(err.Error())
@@ -310,6 +558,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 		m1 := baseMetric
 		m1.Points = [][2]interface{}{{1, float64(2)}}
+		m1.Type = client.Count
 		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
@@ -328,6 +577,7 @@ func TestStats_CountGauge(t *testing.T) {
 
 		m1 := baseMetric
 		m1.Points = [][2]interface{}{{1, float64(10)}}
+		m1.Type = client.Count
 		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1}}}
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
@@ -355,27 +605,15 @@ func TestStats_CountGauge(t *testing.T) {
 		}
 	})
 
-	t.Run("one gauge and one increment", func(tt *testing.T) {
+	t.Run("no calls", func(tt *testing.T) {
 		stats, testApi, err := NewTestStatsWithStart()
 		if err != nil {
 			tt.Fatalf(err.Error())
 		}
-		stats.Gauge("test2", 10, nil)
-		stats.Increment("test", nil)
 		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
-		m2 := baseMetric
-		m2.Points = [][2]interface{}{{1, float64(1)}}
-		m2.Metric = "testNamespace.test"
-		m1 := baseMetric
-		m1.Points = [][2]interface{}{{1, float64(10)}}
-		m1.Metric = "testNamespace.test2"
-		m1.Type = client.Gauge
-		m1.Interval = 0
-		seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&m1, &m2}}}
-
-		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+		if err := testApi.TestValidateCalls([]*client.DDMetricSeries{}, 0, 0); err != nil {
 			tt.Fatalf(err.Error())
 		}
 	})
@@ -415,6 +653,69 @@ func TestStats_Event(t *testing.T) {
 
 		if testApi.events[0].Host != testEvent.Host {
 			tt.Fatalf("expected host to be %s, have %s", testEvent.Host, testApi.events[0].Host)
+		}
+
+		if testApi.events[0].AggregationKey != "testNamespace.testEvent" {
+			tt.Fatalf("expected AggregationKey to be %s, have %s", "testNamespace.testEvent", testApi.events[0].AggregationKey)
+		}
+	})
+
+	t.Run("no host", func(tt *testing.T) {
+		stats, testApi, err := NewTestStats()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		sendEvent := testEvent
+		sendEvent.Host = ""
+		if err := stats.Event(&sendEvent); err != nil {
+			tt.Fatalf("expected no error on send, have %s", err.Error())
+		}
+
+		testEventNoHost := testEvent
+		testEventNoHost.Host = testHost
+
+		if len(testApi.events) != 1 {
+			tt.Fatalf("expected %d calls to send events, have %d", 1, len(testApi.events))
+		}
+
+		if len(testApi.events[0].Tags) != 1 {
+			tt.Fatalf("expected %d tags, have %d", 1, len(testApi.events[0].Tags))
+		}
+
+		if testApi.events[0].Host != testEventNoHost.Host {
+			tt.Fatalf("expected host to be %s, have %s", testEventNoHost.Host, testApi.events[0].Host)
+		}
+
+		if testApi.events[0].AggregationKey != "testNamespace.testEvent" {
+			tt.Fatalf("expected AggregationKey to be %s, have %s", "testNamespace.testEvent", testApi.events[0].AggregationKey)
+		}
+	})
+
+	t.Run("no date", func(tt *testing.T) {
+		stats, testApi, err := NewTestStats()
+		if err != nil {
+			tt.Fatalf(err.Error())
+		}
+		sendEvent := testEvent
+		sendEvent.DateHappened = 0
+		if err := stats.Event(&sendEvent); err != nil {
+			tt.Fatalf("expected no error on send, have %s", err.Error())
+		}
+
+		if len(testApi.events) != 1 {
+			tt.Fatalf("expected %d calls to send events, have %d", 1, len(testApi.events))
+		}
+
+		if len(testApi.events[0].Tags) != 1 {
+			tt.Fatalf("expected %d tags, have %d", 1, len(testApi.events[0].Tags))
+		}
+
+		if testApi.events[0].Host != testEvent.Host {
+			tt.Fatalf("expected host to be %s, have %s", testEvent.Host, testApi.events[0].Host)
+		}
+
+		if testApi.events[0].DateHappened == 0 {
+			tt.Fatalf("expected DateHappened to be set, have %d", testApi.events[0].DateHappened)
 		}
 
 		if testApi.events[0].AggregationKey != "testNamespace.testEvent" {
@@ -641,19 +942,82 @@ func TestStats_ErrorCallback(t *testing.T) {
 }
 
 func TestStats_GetDroppedMetricCount(t *testing.T) {
-	stats := &Stats{
-		metricUpdates: make(chan *metric, 2),
-	}
 
-	if stats.GetDroppedMetricCount() != 0 {
-		t.Fatalf("expected GetDroppedMetricCount to be %d, have %d", 0, stats.GetDroppedMetricCount())
-	}
+	t.Run("dropped rate", func(tt *testing.T) {
+		stats := &Stats{
+			metricUpdates: make(chan *metric, 2),
+		}
 
-	stats.Increment("one", nil)
-	stats.Increment("one", nil)
-	stats.Increment("one", nil)
+		if stats.GetDroppedMetricCount() != 0 {
+			tt.Fatalf("expected GetDroppedMetricCount to be %d, have %d", 0, stats.GetDroppedMetricCount())
+		}
 
-	if stats.GetDroppedMetricCount() != 1 {
-		t.Fatalf("expected GetDroppedMetricCount to be %d, have %d", 1, stats.GetDroppedMetricCount())
-	}
+		stats.IncrementRate("one", nil)
+		stats.IncrementRate("one", nil)
+		stats.IncrementRate("one", nil)
+
+		if stats.GetDroppedMetricCount() != 1 {
+			tt.Fatalf("expected GetDroppedMetricCount to be %d, have %d", 1, stats.GetDroppedMetricCount())
+		}
+	})
+
+	t.Run("dropped count", func(tt *testing.T) {
+		stats := &Stats{
+			metricUpdates: make(chan *metric, 2),
+		}
+
+		if stats.GetDroppedMetricCount() != 0 {
+			tt.Fatalf("expected GetDroppedMetricCount to be %d, have %d", 0, stats.GetDroppedMetricCount())
+		}
+
+		stats.Increment("one", nil)
+		stats.Increment("one", nil)
+		stats.Increment("one", nil)
+
+		if stats.GetDroppedMetricCount() != 1 {
+			tt.Fatalf("expected GetDroppedMetricCount to be %d, have %d", 1, stats.GetDroppedMetricCount())
+		}
+	})
+
+	t.Run("dropped gauge", func(tt *testing.T) {
+		stats := &Stats{
+			metricUpdates: make(chan *metric, 2),
+		}
+
+		if stats.GetDroppedMetricCount() != 0 {
+			tt.Fatalf("expected GetDroppedMetricCount to be %d, have %d", 0, stats.GetDroppedMetricCount())
+		}
+
+		stats.Gauge("one", 1, nil)
+		stats.Gauge("one", 1, nil)
+		stats.Gauge("one", 1, nil)
+
+		if stats.GetDroppedMetricCount() != 1 {
+			tt.Fatalf("expected GetDroppedMetricCount to be %d, have %d", 1, stats.GetDroppedMetricCount())
+		}
+	})
+}
+
+func Test_appendErrorsList(t *testing.T) {
+
+	t.Run("under max", func(tt *testing.T) {
+
+		result := appendErrorsList([]error{fmt.Errorf("one")}, fmt.Errorf("two"), 2)
+
+		if len(result) != 2 {
+			tt.Fatalf("expected to have %d errors returned, have %d", 2, len(result))
+		}
+	})
+
+	t.Run("over max", func(tt *testing.T) {
+
+		result := appendErrorsList([]error{fmt.Errorf("one")}, fmt.Errorf("two"), 1)
+
+		if len(result) != 1 {
+			tt.Fatalf("expected to have %d errors returned, have %d", 1, len(result))
+		}
+		if result[0].Error() != "two" {
+			tt.Fatalf("expected first error to be %s, have %s", "two", result[0].Error())
+		}
+	})
 }

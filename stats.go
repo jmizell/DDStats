@@ -18,28 +18,30 @@ type job struct {
 }
 
 type Stats struct {
-	namespace     string
-	host          string
-	tags          []string
-	flushInterval time.Duration
-	workerCount   int
-	workerBuffer  int
-	metricBuffer  int
-	client        client.APIClient
-	metrics       []map[string]*metric
-	metricUpdates chan *metric
-	workers       []chan *job
-	shutdown      chan bool
-	flush         chan bool
-	workerWG      *sync.WaitGroup
-	flushWG       *sync.WaitGroup
-	ready         chan bool
-	flushCallback func(metricSeries []*client.DDMetric)
-	errorCallback func(err error, metricSeries []*client.DDMetric)
-	errors        []error
-	maxErrors     int
-	errorLock     *sync.RWMutex
-	dropped       uint64
+	namespace       string
+	host            string
+	tags            []string
+	flushInterval   time.Duration
+	workerCount     int
+	workerBuffer    int
+	metricBuffer    int
+	client          client.APIClient
+	metrics         []map[string]*metric
+	metricsQueue    []*client.DDMetric
+	metricQueueLock *sync.Mutex
+	metricUpdates   chan *metric
+	workers         []chan *job
+	shutdown        chan bool
+	flush           chan bool
+	workerWG        *sync.WaitGroup
+	flushWG         *sync.WaitGroup
+	ready           chan bool
+	flushCallback   func(metricSeries []*client.DDMetric)
+	errorCallback   func(err error, metricSeries []*client.DDMetric)
+	errors          []error
+	maxErrors       int
+	errorLock       *sync.RWMutex
+	dropped         uint64
 }
 
 func NewStats(cfg *Config) (*Stats, error) {
@@ -92,6 +94,10 @@ func (c *Stats) start() {
 	for i := range c.metrics {
 		c.metrics[i] = map[string]*metric{}
 	}
+
+	// Setup our raw metrics publish queue
+	c.metricsQueue = make([]*client.DDMetric, 0)
+	c.metricQueueLock = &sync.Mutex{}
 
 	// Start our works, each worker has it's own channel.
 	c.workers = make([]chan *job, c.workerCount)
@@ -213,14 +219,31 @@ func (c *Stats) send(metrics map[string]*metric, flushTime time.Duration) {
 
 	defer c.flushWG.Done()
 
-	if len(metrics) == 0 {
+	var metricsQueue []*client.DDMetric
+	c.metricQueueLock.Lock()
+	if len(c.metricsQueue) > 0 {
+		metricsQueue = c.metricsQueue
+		c.metricsQueue = make([]*client.DDMetric, 0)
+	}
+	c.metricQueueLock.Unlock()
+	if len(metrics) == 0 && metricsQueue == nil {
 		return
 	}
 
-	metricsSeries := make([]*client.DDMetric, 0, len(metrics))
+	// Allocate our new series, and copy the metric queue
+	var metricsSeries []*client.DDMetric
+	if metricsQueue != nil {
+		metricsSeries = make([]*client.DDMetric, 0, len(metrics)+len(metricsQueue))
+		for _, m := range metricsQueue {
+			metricsSeries = append(metricsSeries, m)
+		}
+	} else {
+		metricsSeries = make([]*client.DDMetric, 0, len(metrics))
+	}
 	for _, m := range metrics {
 		metricsSeries = append(metricsSeries, m.getMetric(c.namespace, c.host, c.tags, flushTime))
 	}
+
 	if err := c.SendSeries(metricsSeries); err != nil {
 		c.errorLock.Lock()
 		c.errors = appendErrorsList(c.errors, err, c.maxErrors)
@@ -247,6 +270,20 @@ func (c *Stats) SendSeries(series []*client.DDMetric) error {
 		m.Tags = combineTags(c.tags, m.Tags)
 	}
 	return c.client.SendSeries(&client.DDMetricSeries{Series: series})
+}
+
+// QueueSeries adds a series of metrics to the queue to be be sent with the next flush.
+func (c *Stats) QueueSeries(series []*client.DDMetric) {
+	for _, m := range series {
+		if m.Host == "" {
+			m.Host = c.host
+		}
+		m.Metric = prependNamespace(c.namespace, m.Metric)
+		m.Tags = combineTags(c.tags, m.Tags)
+	}
+	c.metricQueueLock.Lock()
+	defer c.metricQueueLock.Unlock()
+	c.metricsQueue = append(c.metricsQueue, series...)
 }
 
 // ServiceCheck immediately posts an DDServiceCheck to he Datadog api. The namespace is
@@ -278,27 +315,57 @@ func (c *Stats) Event(event *client.DDEvent) error {
 }
 
 // Increment creates or increments a count metric by +1. This is a non-blocking method, if
-// the channel buffer is full, then the metric is not recorded. Count stats are sent as rate,
-// by taking the count value and dividing by the number of seconds since the last flush.
+// the channel buffer is full, then the metric is not recorded. Count stats are sent as count,
+// by taking the sum value of all values in the flush interval.
 func (c *Stats) Increment(name string, tags []string) {
 	c.Count(name, 1, tags)
 }
 
 // Decrement creates or subtracts a count metric by -1. This is a non-blocking method, if
-// the channel buffer is full, then the metric is not recorded. Count stats are sent as rate,
-// by taking the count value and dividing by the number of seconds since the last flush.
+// the channel buffer is full, then the metric is not recorded. Count stats are sent as count,
+// by taking the sum value of all values in the flush interval.
 func (c *Stats) Decrement(name string, tags []string) {
 	c.Count(name, -1, tags)
 }
 
 // Count creates or adds a count metric by value. This is a non-blocking method, if
-// the channel buffer is full, then the metric is not recorded. Count stats are sent as rate,
-// by taking the count value and dividing by the number of seconds since the last flush.
+// the channel buffer is full, then the metric is not recorded. Count stats are sent as count,
+// by taking the sum value of all values in the flush interval.
 func (c *Stats) Count(name string, value float64, tags []string) {
 	select {
 	case c.metricUpdates <- &metric{
 		name:  name,
 		class: client.Count,
+		value: value,
+		tags:  tags,
+	}:
+	default:
+		atomic.AddUint64(&c.dropped, 1)
+	}
+}
+
+// IncrementRate creates or increments a rate metric by +1. This is a non-blocking method, if
+// the channel buffer is full, then the metric is not recorded. Rate stats are sent as rate,
+// by taking the count value and dividing by the number of seconds since the last flush.
+func (c *Stats) IncrementRate(name string, tags []string) {
+	c.Rate(name, 1, tags)
+}
+
+// DecrementRate creates or subtracts a rate metric by -1. This is a non-blocking method, if
+// the channel buffer is full, then the metric is not recorded. Rate stats are sent as rate,
+// by taking the count value and dividing by the number of seconds since the last flush.
+func (c *Stats) DecrementRate(name string, tags []string) {
+	c.Rate(name, -1, tags)
+}
+
+// Rate creates or adds a rate metric by value. This is a non-blocking method, if
+// the channel buffer is full, then the metric is not recorded. Rate stats are sent as rate,
+// by taking the count value and dividing by the number of seconds since the last flush.
+func (c *Stats) Rate(name string, value float64, tags []string) {
+	select {
+	case c.metricUpdates <- &metric{
+		name:  name,
+		class: client.Rate,
 		value: value,
 		tags:  tags,
 	}:
