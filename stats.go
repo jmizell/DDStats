@@ -15,39 +15,35 @@ import (
 type job struct {
 	metric   *metric
 	shutdown bool
+	flush    bool
 }
 
 type Stats struct {
-	namespace        string
-	host             string
-	tags             []string
-	flushInterval    time.Duration
-	workerCount      int
-	workerBuffer     int
-	metricBuffer     int
-	client           client.APIClient
-	metrics          []map[string]*metric
-	metricsQueue     []*client.DDMetric
-	metricQueueLock  *sync.Mutex
-	metricUpdates    chan *metric
-	workers          []chan *job
-
-
-	shutdownSignal         chan bool
-	shutdown bool
-	shutdownLock     *sync.Mutex
-
-	flush            chan bool
-	workerWG         *sync.WaitGroup
-	flushWG          *sync.WaitGroup
-	ready            chan bool
-	flushCallback    func(metricSeries []*client.DDMetric)
-	errorCallback    func(err error, metricSeries []*client.DDMetric)
-	errors           []error
-	maxErrors        int
-	errorLock        *sync.RWMutex
-	dropped          uint64
-	lastFlush        time.Time
+	namespace       string
+	host            string
+	tags            []string
+	flushInterval   time.Duration
+	workerCount     int
+	workerBuffer    int
+	metricBuffer    int
+	client          client.APIClient
+	metrics         []map[string]*metric
+	metricsQueue    []*client.DDMetric
+	metricQueueLock *sync.Mutex
+	jobs            chan *job
+	workers         []chan *job
+	shutdown        bool
+	shutdownLock    *sync.Mutex
+	workerWG        *sync.WaitGroup
+	flushWG         *sync.WaitGroup
+	ready           chan bool
+	flushCallback   func(metricSeries []*client.DDMetric)
+	errorCallback   func(err error, metricSeries []*client.DDMetric)
+	errors          []error
+	maxErrors       int
+	errorLock       *sync.RWMutex
+	dropped         uint64
+	lastFlush       time.Time
 }
 
 func NewStats(cfg *Config) (*Stats, error) {
@@ -80,10 +76,9 @@ func NewStats(cfg *Config) (*Stats, error) {
 func (c *Stats) start() {
 
 	// Setup our channels
-	c.shutdownSignal = make(chan bool)
 	c.shutdownLock = &sync.Mutex{}
 	c.shutdown = false
-	c.metricUpdates = make(chan *metric, c.metricBuffer)
+	c.jobs = make(chan *job, c.metricBuffer)
 
 	// Setup wait group for workers. Flush wait group is separate as
 	// we don't want to block processing new stats, if a flush worker
@@ -118,18 +113,18 @@ func (c *Stats) start() {
 	// a shutdown signal.
 	shutdownFlushSignalWorker := make(chan bool)
 	flushSignalWorkerWG := &sync.WaitGroup{}
-	c.flush = make(chan bool)
+	flushSignalWorkerWG.Add(1)
 	go func() {
+		defer flushSignalWorkerWG.Done()
 		flush := time.NewTicker(c.flushInterval)
 		for {
 			select {
 			case <-flush.C:
 				// Add a job to the flush wait group
 				c.flushWG.Add(1)
-				c.flush <- true
+				c.jobs <- &job{flush: true}
 			case <-shutdownFlushSignalWorker:
 				flush.Stop()
-				flushSignalWorkerWG.Done()
 				return
 			}
 		}
@@ -141,17 +136,13 @@ func (c *Stats) start() {
 	// our rate metrics.
 	c.lastFlush = time.Now()
 	for {
-		select {
-		case metric := <-c.metricUpdates:
-			// New metric has been sent, we want to add a job to the wait group, and
-			// then we assign it to the worker by using a FNV-1a hash. This should ensure
-			// that the same worker always sees the same metric.
-			c.workerWG.Add(1)
-			c.workers[fnv1a(metric.name)%uint32(len(c.workers))] <- &job{metric: metric}
-		case <-c.flush:
-			// Copy out the metrics for this interval, and send them
-			c.commitFlush()
-		case <-c.shutdownSignal:
+		j, ok := <-c.jobs
+		if !ok {
+			return
+		}
+
+		switch {
+		case j.shutdown:
 
 			// Perform a final flush of all stats. Anything buffered in the updates channel
 			// will be dropped.
@@ -164,7 +155,6 @@ func (c *Stats) start() {
 			}
 
 			// Signal to the flush worker to shutdown, wait before returning
-			flushSignalWorkerWG.Add(1)
 			shutdownFlushSignalWorker <- true
 			flushSignalWorkerWG.Wait()
 
@@ -173,6 +163,15 @@ func (c *Stats) start() {
 			c.flushWG.Wait()
 
 			return
+		case j.flush:
+			// Copy out the metrics for this interval, and send them
+			c.commitFlush()
+		case j.metric != nil:
+			// New metric has been sent, we want to add a job to the wait group, and
+			// then we assign it to the worker by using a FNV-1a hash. This should ensure
+			// that the same worker always sees the same metric.
+			c.workerWG.Add(1)
+			c.workers[fnv1a(j.metric.name)%uint32(len(c.workers))] <- j
 		}
 	}
 }
@@ -352,12 +351,12 @@ func (c *Stats) Decrement(name string, tags []string) {
 // by taking the sum value of all values in the flush interval.
 func (c *Stats) Count(name string, value float64, tags []string) {
 	select {
-	case c.metricUpdates <- &metric{
+	case c.jobs <- &job{metric: &metric{
 		name:  name,
 		class: client.Count,
 		value: value,
 		tags:  tags,
-	}:
+	}}:
 	default:
 		atomic.AddUint64(&c.dropped, 1)
 	}
@@ -382,12 +381,12 @@ func (c *Stats) DecrementRate(name string, tags []string) {
 // by taking the count value and dividing by the number of seconds since the last flush.
 func (c *Stats) Rate(name string, value float64, tags []string) {
 	select {
-	case c.metricUpdates <- &metric{
+	case c.jobs <- &job{metric: &metric{
 		name:  name,
 		class: client.Rate,
 		value: value,
 		tags:  tags,
-	}:
+	}}:
 	default:
 		atomic.AddUint64(&c.dropped, 1)
 	}
@@ -398,12 +397,12 @@ func (c *Stats) Rate(name string, value float64, tags []string) {
 // as the last value sent before flush is called.
 func (c *Stats) Gauge(name string, value float64, tags []string) {
 	select {
-	case c.metricUpdates <- &metric{
+	case c.jobs <- &job{metric: &metric{
 		name:  name,
 		class: client.Gauge,
 		value: value,
 		tags:  tags,
-	}:
+	}}:
 	default:
 		atomic.AddUint64(&c.dropped, 1)
 	}
@@ -421,7 +420,7 @@ func (c *Stats) GetDroppedMetricCount() uint64 {
 func (c *Stats) Flush() {
 	// Add a job to the flush wait group
 	c.flushWG.Add(1)
-	c.flush <- true
+	c.jobs <- &job{flush: true}
 	c.flushWG.Wait()
 }
 
@@ -455,7 +454,7 @@ func (c *Stats) Close() {
 
 	c.shutdown = true
 	c.flushWG.Add(1)
-	close(c.shutdownSignal)
+	c.jobs <- &job{shutdown: true}
 	c.workerWG.Wait()
 	c.flushWG.Wait()
 }

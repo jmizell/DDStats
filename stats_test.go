@@ -361,7 +361,6 @@ func TestStats_Close(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 		stats.IncrementRate("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
@@ -375,7 +374,6 @@ func TestStats_Close(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 		stats.IncrementRate("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 		stats.Close()
 
@@ -390,11 +388,15 @@ func TestStats_Close(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 		stats.IncrementRate("test", nil)
-		time.Sleep(time.Millisecond * 100)
+		wg := &sync.WaitGroup{}
+		wg.Add(50)
 		for i := 0; i < 50; i++ {
-			go stats.Close()
+			go func() {
+				defer wg.Done()
+				stats.Close()
+			}()
 		}
-		time.Sleep(time.Second * 1)
+		wg.Wait()
 
 		if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
 			tt.Fatalf(err.Error())
@@ -418,8 +420,38 @@ func TestStats_Flush(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 	stats.IncrementRate("test", nil)
-	time.Sleep(time.Millisecond * 100)
 	stats.Flush()
+
+	if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
+		t.Fatalf(err.Error())
+	}
+}
+
+func TestStats_FlushWorker(t *testing.T) {
+
+	baseMetric := client.DDMetric{
+		Host:     testHost,
+		Metric:   "testNamespace.test",
+		Tags:     []string{"tag:1"},
+		Interval: 2,
+		Points:   [][2]interface{}{{1, float64(1)}},
+		Type:     client.Count,
+	}
+	seriesCalls := []*client.DDMetricSeries{{Series: []*client.DDMetric{&baseMetric}}}
+
+	testApi := NewTestAPIClient()
+
+	cfg := NewConfig().WithNamespace(testNamespace).WithHost(testHost).WithTags(testTags).WithClient(testApi)
+	cfg.WorkerBuffer = 2
+	cfg.WorkerCount = 1
+	cfg.MetricBuffer = 2
+	cfg.FlushIntervalSeconds = 2
+	stats, err := NewStats(cfg)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	stats.Increment("test", nil)
+	time.Sleep(time.Second * 3)
 
 	if err := testApi.TestValidateCalls(seriesCalls, 0, 0); err != nil {
 		t.Fatalf(err.Error())
@@ -442,7 +474,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 		stats.IncrementRate("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -461,7 +492,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 		}
 		stats.IncrementRate("test", nil)
 		stats.IncrementRate("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -479,7 +509,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 		stats.DecrementRate("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -498,7 +527,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 		}
 		stats.DecrementRate("test", nil)
 		stats.DecrementRate("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -519,7 +547,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 		stats.IncrementRate("test", nil)
 		stats.IncrementRate("test", nil)
 		stats.DecrementRate("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -537,7 +564,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 		stats.Rate("test", 10, nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -555,7 +581,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 		stats.Increment("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -575,7 +600,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 		}
 		stats.Increment("test", nil)
 		stats.Increment("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -594,7 +618,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 		stats.Decrement("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -614,7 +637,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 		}
 		stats.Decrement("test", nil)
 		stats.Decrement("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -636,7 +658,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 		stats.Increment("test", nil)
 		stats.Increment("test", nil)
 		stats.Decrement("test", nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -655,7 +676,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 		stats.Count("test", 10, nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -674,7 +694,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 			tt.Fatalf(err.Error())
 		}
 		stats.Gauge("test", 10, nil)
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		m1 := baseMetric
@@ -693,7 +712,6 @@ func TestStats_CountGaugeRate(t *testing.T) {
 		if err != nil {
 			tt.Fatalf(err.Error())
 		}
-		time.Sleep(time.Millisecond * 100)
 		stats.Close()
 
 		if err := testApi.TestValidateCalls([]*client.DDMetricSeries{}, 0, 0); err != nil {
@@ -1028,7 +1046,7 @@ func TestStats_GetDroppedMetricCount(t *testing.T) {
 
 	t.Run("dropped rate", func(tt *testing.T) {
 		stats := &Stats{
-			metricUpdates: make(chan *metric, 2),
+			jobs: make(chan *job, 2),
 		}
 
 		if stats.GetDroppedMetricCount() != 0 {
@@ -1046,7 +1064,7 @@ func TestStats_GetDroppedMetricCount(t *testing.T) {
 
 	t.Run("dropped count", func(tt *testing.T) {
 		stats := &Stats{
-			metricUpdates: make(chan *metric, 2),
+			jobs: make(chan *job, 2),
 		}
 
 		if stats.GetDroppedMetricCount() != 0 {
@@ -1064,7 +1082,7 @@ func TestStats_GetDroppedMetricCount(t *testing.T) {
 
 	t.Run("dropped gauge", func(tt *testing.T) {
 		stats := &Stats{
-			metricUpdates: make(chan *metric, 2),
+			jobs: make(chan *job, 2),
 		}
 
 		if stats.GetDroppedMetricCount() != 0 {

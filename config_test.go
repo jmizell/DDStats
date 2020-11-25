@@ -69,3 +69,71 @@ func TestConfig_WithAPIKey(t *testing.T) {
 		t.Fatalf("expected api key to be %s, have %s", "test key", cfg.APIKey)
 	}
 }
+
+func TestConfig_loadEnvFloat64(t *testing.T) {
+	testKey := "TestConfig_loadEnvFloat64"
+	t.Run("var exists", func(tt *testing.T) {
+		if err := os.Setenv(testKey, "1.1"); err != nil {
+			t.Fatalf("could not set environment %s", err.Error())
+		}
+		i := 10.0
+		loadEnvFloat64(&i, testKey)
+		if i != 1.1 {
+			tt.Fatalf("expected variable to be set to %f, have %f", 1.1, i)
+		}
+	})
+	t.Run("var invalid", func(tt *testing.T) {
+		if err := os.Setenv(testKey, "not a number"); err != nil {
+			t.Fatalf("could not set environment %s", err.Error())
+		}
+		i := 10.0
+		loadEnvFloat64(&i, testKey)
+		if i != 0 {
+			tt.Fatalf("expected variable to be set to %f, have %f", 0.0, i)
+		}
+	})
+	t.Run("var empty", func(tt *testing.T) {
+		if err := os.Setenv(testKey, ""); err != nil {
+			t.Fatalf("could not set environment %s", err.Error())
+		}
+		i := 10.0
+		loadEnvFloat64(&i, testKey)
+		if i != 10.0 {
+			tt.Fatalf("expected variable to be set to %f, have %f", 10.0, i)
+		}
+	})
+}
+
+func TestConfig_loadEnvInt(t *testing.T) {
+	testKey := "TestConfig_loadEnvInt"
+	t.Run("var exists", func(tt *testing.T) {
+		if err := os.Setenv(testKey, "1"); err != nil {
+			t.Fatalf("could not set environment %s", err.Error())
+		}
+		i := 10
+		loadEnvInt(&i, testKey)
+		if i != 1 {
+			tt.Fatalf("expected variable to be set to %d, have %d", 1, i)
+		}
+	})
+	t.Run("var invalid", func(tt *testing.T) {
+		if err := os.Setenv(testKey, "not a number"); err != nil {
+			t.Fatalf("could not set environment %s", err.Error())
+		}
+		i := 10
+		loadEnvInt(&i, testKey)
+		if i != 0 {
+			tt.Fatalf("expected variable to be set to %d, have %d", 1, i)
+		}
+	})
+	t.Run("var empty", func(tt *testing.T) {
+		if err := os.Setenv(testKey, ""); err != nil {
+			t.Fatalf("could not set environment %s", err.Error())
+		}
+		i := 10
+		loadEnvInt(&i, testKey)
+		if i != 10.0 {
+			tt.Fatalf("expected variable to be set to %d, have %d", 1, i)
+		}
+	})
+}
