@@ -115,13 +115,14 @@ func TestDDClient_SendEvent(t *testing.T) {
 
 	t.Run("client error", func(tt *testing.T) {
 		client := NewDDClient("testKey")
-		httpClient := newTestHTTPClient(0, "", fmt.Errorf("client error"))
+		httpClient := newTestHTTPClient(0, "", fmt.Errorf("client error calling %s", callURL))
 		client.SetHTTPClient(httpClient)
+		expectedError := "client error calling https://api.datadoghq.com/api/v1/events?api_key=XXXXAPI_KEYXXXX"
 
 		if err := client.SendEvent(&testEvent); err == nil {
 			tt.Fatalf("expected an error, have nil")
-		} else if err.Error() != "client error" {
-			tt.Fatalf("expected error to be %s, have %s", "client error", err.Error())
+		} else if err.Error() != expectedError {
+			tt.Fatalf("expected error to be %s, have %s", expectedError, err.Error())
 		}
 
 		if httpClient.callURL != callURL {

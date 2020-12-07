@@ -66,30 +66,40 @@ func (c *DDClient) post(payload interface{}, encoding, url string) error {
 
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("could not marshal data to json, %s", err.Error())
+		return maskAPIKey(fmt.Errorf("could not marshal data to json, %s", err.Error()), c.apiKey)
 	}
 
 	response, err := c.client.Post(url, encoding, bytes.NewReader(data))
 	if err != nil {
-		return err
+		return maskAPIKey(err, c.apiKey)
 	}
 	defer func() { _ = response.Body.Close() }()
 
 	responseBytes, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		return fmt.Errorf("could not read api response, %s", err.Error())
+		return maskAPIKey(fmt.Errorf("could not read api response, %s", err.Error()), c.apiKey)
 	}
 
 	apiResponse := &DDApiResponse{}
 	if err := json.Unmarshal(responseBytes, apiResponse); err != nil {
-		return fmt.Errorf("could not read api response, %s", err.Error())
+		return maskAPIKey(fmt.Errorf("could not read api response, %s", err.Error()), c.apiKey)
 	}
 
 	if response.StatusCode > 299 {
-		return fmt.Errorf("api response %d: %s", response.StatusCode, strings.Join(apiResponse.Errors, ", "))
+		err := fmt.Errorf("api response %d: %s", response.StatusCode, strings.Join(apiResponse.Errors, ", "))
+		return maskAPIKey(err, c.apiKey)
 	}
 
 	return nil
+}
+
+func maskAPIKey(err error, key string) error {
+
+	if err == nil {
+		return nil
+	}
+
+	return fmt.Errorf(strings.ReplaceAll(err.Error(), key, "XXXXAPI_KEYXXXX"))
 }
 
 type DDApiResponse struct {
